@@ -907,12 +907,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         except Exception:
             pass
 
-        # Kurzlabels setzen und unten nebeneinander einsetzen
+        # 设置简短标签并在下方并排显示
         short_map = {
-            "findTargetFacesButton": "Find",
-            "clearTargetFacesButton": "Clear",
-            "swapfacesButton": "Swap",
-            "editFacesButton": "Edit",
+            "findTargetFacesButton": "查找",
+            "clearTargetFacesButton": "清除",
+            "swapfacesButton": "换脸",
+            "editFacesButton": "编辑",
         }
         for b in btns:
             b.setParent(self._rightFacesStrip)

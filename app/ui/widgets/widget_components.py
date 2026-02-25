@@ -1261,45 +1261,49 @@ class CreateEmbeddingDialog(QtWidgets.QDialog):
         self.main_window = main_window
         self.embedding_name = ""
         self.merge_type = ""
-        self.setWindowTitle("Create Embedding")
+        self.setWindowTitle("创建嵌入")
         self.setWindowIcon(QtGui.QIcon(":/media/media/visomaster_small.png"))
 
-        # Create widgets
+        # 创建控件
         self.embed_name_edit = QtWidgets.QLineEdit(self)
-        self.embed_name_edit.setPlaceholderText("Enter embedding name")
+        self.embed_name_edit.setPlaceholderText("输入嵌入名称")
 
         self.merge_type_selection = QtWidgets.QComboBox(self)
-        self.merge_type_selection.addItems(["Mean", "Median"])
-        self.merge_type_selection.setCurrentText(
-            main_window.control["EmbMergeMethodSelection"]
-        )
+        self.merge_type_selection.addItems(["平均值", "中位数"])
+        # 将英文选项映射为中文
+        merge_method_map = {"Mean": "平均值", "Median": "中位数"}
+        current_method = main_window.control["EmbMergeMethodSelection"]
+        self.merge_type_selection.setCurrentText(merge_method_map.get(current_method, current_method))
 
-        # Create button box
+        # 创建按钮框
         QBtn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
         self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
         self.buttonBox.accepted.connect(self.create_embedding)
         self.buttonBox.rejected.connect(self.reject)
 
-        # Create layout and add widgets
+        # 创建布局并添加控件
         layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(QtWidgets.QLabel("Embedding Name:"))
+        layout.addWidget(QtWidgets.QLabel("嵌入名称:"))
         layout.addWidget(self.embed_name_edit)
-        layout.addWidget(QtWidgets.QLabel("Merge Type:"))
+        layout.addWidget(QtWidgets.QLabel("合并类型:"))
         layout.addWidget(self.merge_type_selection)
         layout.addWidget(self.buttonBox)
 
-        # Set dialog layout
+        # 设置对话框布局
         self.setLayout(layout)
 
     def create_embedding(self):
         self.embedding_name = self.embed_name_edit.text().strip()
         self.merge_type = self.merge_type_selection.currentText()
+        # 将中文选项映射回英文
+        merge_method_map = {"平均值": "Mean", "中位数": "Median"}
+        self.merge_type = merge_method_map.get(self.merge_type, self.merge_type)
 
         if self.embedding_name == "":
             common_widget_actions.create_and_show_messagebox(
                 self.main_window,
-                "Empty Embedding Name!",
-                "Embedding Name cannot be empty!",
+                "嵌入名称为空！",
+                "嵌入名称不能为空！",
                 self,
             )
         else:
@@ -1334,21 +1338,21 @@ class CreateEmbeddingDialog(QtWidgets.QDialog):
 
 class LoadingDialog(QtWidgets.QDialog):
     def __init__(
-        self, message="Loading Models, please wait...\nDon't panic if it looks stuck!"
+        self, message="正在加载模型，请稍候...\n如果看起来卡住了，请不要惊慌！"
     ):
         super().__init__()
-        self.setWindowTitle("Loading Models")
+        self.setWindowTitle("加载模型")
         self.setWindowIcon(QtGui.QIcon(":/media/media/visomaster_small.png"))
         self.setWindowFlag(QtCore.Qt.WindowCloseButtonHint, False)
-        self.setModal(True)  # Block interaction with other windows
-        self.setFixedSize(225, 125)  # Increased size for better layout
+        self.setModal(True)  # 阻止与其他窗口的交互
+        self.setFixedSize(225, 125)  # 增加大小以获得更好的布局
 
-        # Create main layout
+        # 创建主布局
         layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(4, 4, 4, 4)  # Add some padding
-        layout.setSpacing(8)  # Add spacing between elements
+        layout.setContentsMargins(4, 4, 4, 4)  # 添加一些内边距
+        layout.setSpacing(8)  # 在元素之间添加间距
 
-        # Icon Label
+        # 图标标签
         self.icon_label = QtWidgets.QLabel()
         self.icon_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.icon_label.setPixmap(
@@ -1360,16 +1364,16 @@ class LoadingDialog(QtWidgets.QDialog):
             )
         )
 
-        # Message Label
+        # 消息标签
         self.label = QtWidgets.QLabel(message)
         self.label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.label.setWordWrap(True)  # Allow text to wrap within the dialog
+        self.label.setWordWrap(True)  # 允许文本在对话框内换行
         self.label.setStyleSheet("""
-            font-size: 12px;  /* Set font size */
-            font-weight: bold;  /* Make the text bold */
+            font-size: 12px;  /* 设置字体大小 */
+            font-weight: bold;  /* 使文本加粗 */
         """)
 
-        # Add widgets to layout
+        # 将控件添加到布局
         layout.addWidget(self.icon_label)
         layout.addWidget(self.label)
         self.setLayout(layout)
@@ -1413,14 +1417,14 @@ class LoadLastWorkspaceDialog(QtWidgets.QDialog):
 class JobLoadingDialog(QtWidgets.QDialog):
     def __init__(self, total_steps, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Loading Job Data...")
+        self.setWindowTitle("加载任务数据...")
         self.setWindowIcon(QtGui.QIcon(":/media/media/visomaster_small.png"))
         self.setWindowFlag(QtCore.Qt.WindowCloseButtonHint, False)
         self.setModal(True)
         self.setFixedSize(300, 120)
 
         self.layout = QtWidgets.QVBoxLayout()
-        self.label = QtWidgets.QLabel("Loading job data...")
+        self.label = QtWidgets.QLabel("正在加载任务数据...")
         self.label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setRange(0, total_steps)
@@ -1443,30 +1447,30 @@ class JobLoadingDialog(QtWidgets.QDialog):
 class SaveJobDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Save Job")
+        self.setWindowTitle("保存任务")
         self.setWindowIcon(QtGui.QIcon(":/media/media/visomaster_small.png"))
 
-        # Widgets
-        self.job_name_label = QtWidgets.QLabel("Job Name:")
+        # 控件
+        self.job_name_label = QtWidgets.QLabel("任务名称:")
         self.job_name_edit = QtWidgets.QLineEdit(self)
-        self.job_name_edit.setPlaceholderText("Enter job name")
+        self.job_name_edit.setPlaceholderText("输入任务名称")
 
         self.set_output_name_checkbox = QtWidgets.QCheckBox(
-            "Use job name for output file name", self
+            "使用任务名称作为输出文件名", self
         )
         self.set_output_name_checkbox.setChecked(True)
 
-        self.output_name_label = QtWidgets.QLabel("Output File Name:")
+        self.output_name_label = QtWidgets.QLabel("输出文件名:")
         self.output_name_edit = QtWidgets.QLineEdit(self)
-        self.output_name_edit.setPlaceholderText("Leave blank for default")
+        self.output_name_edit.setPlaceholderText("留空使用默认值")
 
-        # Button box
+        # 按钮框
         QBtn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
         self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
 
-        # Layout
+        # 布局
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(self.job_name_label)
         layout.addWidget(self.job_name_edit)
@@ -1476,17 +1480,17 @@ class SaveJobDialog(QtWidgets.QDialog):
         layout.addWidget(self.buttonBox)
         self.setLayout(layout)
 
-        # Connect checkbox signal to slot
+        # 连接复选框信号到槽
         self.set_output_name_checkbox.toggled.connect(self._toggle_output_name_field)
 
-        # Initial state
+        # 初始状态
         self._toggle_output_name_field(self.set_output_name_checkbox.isChecked())
 
     def _toggle_output_name_field(self, checked):
-        """Show/hide the output file name field based on checkbox state."""
+        """根据复选框状态显示/隐藏输出文件名字段。"""
         self.output_name_label.setVisible(not checked)
         self.output_name_edit.setVisible(not checked)
-        # Adjust dialog size hint based on visibility
+        # 根据可见性调整对话框大小
         self.adjustSize()
 
     @property
