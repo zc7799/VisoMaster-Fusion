@@ -233,11 +233,11 @@ COMMON_LAYOUT_DATA: Any = {
         "FaceExpressionModeSelection": {
             "level": 2,
             "label": "模式",
-            "options": ["简单", "高级"],
-            "default": "简单",
+            "options": ["Simple", "Advanced"],
+            "default": "Simple",
             "parentToggle": "FaceExpressionEnableBothToggle",
             "requiredToggleValue": True,
-            "help": "选择 '高级' 以获得微调和重新定位选项。",
+            "help": "选择 'Advanced' 以获得微调和重新定位选项。",
         },
         "FaceExpressionCropScaleBothDecimalSlider": {
             "level": 2,
@@ -287,7 +287,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "简单",
+            "requiredSelectionValue": "Simple",
             "help": "控制驱动面部与换脸后面部之间的表情相似度。",
         },
         "FaceExpressionAnimationRegionSelection": {
@@ -298,7 +298,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "简单",
+            "requiredSelectionValue": "Simple",
             "help": "参与修复过程的面部区域。",
         },
         "FaceExpressionNormalizeLipsEnableToggle": {
@@ -308,7 +308,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "简单",
+            "requiredSelectionValue": "Simple",
             "help": "在面部修复过程中标准化嘴唇。",
         },
         "FaceExpressionNormalizeLipsThresholdDecimalSlider": {
@@ -322,7 +322,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionNormalizeLipsEnableToggle & FaceExpressionEnableBothToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "简单",
+            "requiredSelectionValue": "Simple",
             "help": "标准化嘴唇的阈值。",
         },
         # --- ADVANCED MODE WIDGETS (CURRENT LAYOUT) ---
@@ -337,7 +337,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "使用相对运动时放大动作。默认值为 1.00。",
         },
         "FaceExpressionEyesToggle": {
@@ -347,7 +347,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "激活眼睛面部表情恢复器",
         },
         "FaceExpressionRelativeEyesToggle": {
@@ -357,7 +357,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionEyesToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "使动画相对于源图像的初始姿势。可以获得更自然的外观。",
         },
         "FaceExpressionFriendlyFactorEyesDecimalSlider": {
@@ -371,7 +371,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionEyesToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "控制驱动面部与换脸后面部之间的眼睛表情相似度。",
         },
         "FaceExpressionRetargetingEyesBothEnableToggle": {
@@ -381,7 +381,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionEyesToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "在面部恢复过程中调整或重定向眼睛的凝视或运动。",
         },
         "FaceExpressionRetargetingEyesMultiplierBothDecimalSlider": {
@@ -395,7 +395,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionRetargetingEyesBothEnableToggle & FaceExpressionEnableBothToggle & FaceExpressionEyesToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "眼睛重定向的乘数。",
         },
         "FaceExpressionNormalizeEyesBothEnableToggle": {
@@ -405,7 +405,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionEyesToggle & FaceExpressionRetargetingEyesBothEnableToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "在面部恢复过程中标准化眼睛。",
         },
         "FaceExpressionNormalizeEyesThresholdBothDecimalSlider": {
@@ -419,7 +419,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionNormalizeEyesBothEnableToggle & FaceExpressionEnableBothToggle & FaceExpressionEyesToggle & FaceExpressionRetargetingEyesBothEnableToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "眼睛睁开比例的阈值，它将决定在哪个睁开/闭合比例下使用修改后的 faceutil 函数。",
         },
         "FaceExpressionNormalizeEyesMaxBothDecimalSlider": {
@@ -433,7 +433,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionNormalizeEyesBothEnableToggle & FaceExpressionEnableBothToggle & FaceExpressionEyesToggle & FaceExpressionRetargetingEyesBothEnableToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "目标将拥有的最大眼睛睁开比例（<0.5 最佳）。",
         },
         "FaceExpressionBrowsToggle": {
@@ -443,7 +443,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "激活眉毛的恢复。",
         },
         "FaceExpressionRelativeBrowsToggle": {
@@ -453,7 +453,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionBrowsToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "使动画相对于源图像的初始姿势。减少面部形状的几何扭曲。",
         },
         "FaceExpressionFriendlyFactorBrowsDecimalSlider": {
@@ -467,7 +467,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionBrowsToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "控制眉毛的表情强度。",
         },
         "FaceExpressionLipsToggle": {
@@ -477,7 +477,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "激活嘴唇面部表情恢复器",
         },
         "FaceExpressionRelativeLipsToggle": {
@@ -487,7 +487,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionLipsToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "使动画相对于源图像的初始姿势。可以获得更自然的外观。",
         },
         "FaceExpressionFriendlyFactorLipsDecimalSlider": {
@@ -501,7 +501,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionLipsToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "控制驱动面部与换脸后面部之间的嘴唇表情相似度。",
         },
         "FaceExpressionRetargetingLipsBothEnableToggle": {
@@ -511,7 +511,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionLipsToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "在面部恢复过程中调整或修改嘴唇的位置、形状或运动。",
         },
         "FaceExpressionRetargetingLipsMultiplierBothDecimalSlider": {
@@ -525,7 +525,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionRetargetingLipsBothEnableToggle & FaceExpressionEnableBothToggle & FaceExpressionLipsToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "嘴唇重定向的乘数。",
         },
         "FaceExpressionNormalizeLipsBothEnableToggle": {
@@ -535,7 +535,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionLipsToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "在面部恢复过程中标准化嘴唇。",
         },
         "FaceExpressionNormalizeLipsThresholdBothDecimalSlider": {
@@ -549,7 +549,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionNormalizeLipsBothEnableToggle & FaceExpressionEnableBothToggle & FaceExpressionLipsToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "标准化嘴唇的阈值。",
         },
         "FaceExpressionGeneralToggle": {
@@ -559,7 +559,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "激活一般表情的恢复。（在 frame_edits.py 中注释或取消注释面部部分以获得更多控制）",
         },
         "FaceExpressionRelativeGeneralToggle": {
@@ -569,7 +569,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionGeneralToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "使动画相对于源图像的初始姿势。减少面部形状的几何扭曲。",
         },
         "FaceExpressionGeneralNoseToggle": {
@@ -579,7 +579,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionGeneralToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "将鼻子索引添加到一般表情中。",
         },
         "FaceExpressionGeneralJawToggle": {
@@ -589,7 +589,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionGeneralToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "将下巴索引添加到一般表情中。",
         },
         "FaceExpressionGeneralCheekToggle": {
@@ -599,7 +599,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionGeneralToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "将脸颊索引添加到一般表情中。",
         },
         "FaceExpressionGeneralContourToggle": {
@@ -609,7 +609,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionGeneralToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "将轮廓索引添加到一般表情中。",
         },
         "FaceExpressionGeneralHeadToggle": {
@@ -619,7 +619,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionGeneralToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "将头顶索引添加到一般表情中。",
         },
         "FaceExpressionFriendlyFactorGeneralDecimalSlider": {
@@ -633,7 +633,7 @@ COMMON_LAYOUT_DATA: Any = {
             "parentToggle": "FaceExpressionEnableBothToggle & FaceExpressionGeneralToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
-            "requiredSelectionValue": "高级",
+            "requiredSelectionValue": "Advanced",
             "help": "控制一般特征的表情强度。",
         },
     },
