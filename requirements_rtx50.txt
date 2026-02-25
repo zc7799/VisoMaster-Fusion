@@ -27,3 +27,4 @@ requests
 pyqt-toast-notification
 qdarkstyle
 pyqtdarktheme
+pypinyin

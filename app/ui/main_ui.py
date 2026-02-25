@@ -195,6 +195,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.buttonInputFacesPath.clicked.connect(
             partial(list_view_actions.select_input_face_images, self, "folder")
         )
+        self.buttonFindFace.clicked.connect(
+            partial(list_view_actions.show_find_face_dialog, self)
+        )
 
         # Initialize graphics frame to view frames
         self.scene = QtWidgets.QGraphicsScene()

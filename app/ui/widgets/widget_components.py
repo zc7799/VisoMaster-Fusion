@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QPushButton
 import cv2
 import numpy as np
 import torch
+from pypinyin import lazy_pinyin
 
 import app.ui.widgets.actions.common_actions as common_widget_actions
 from app.ui.widgets.actions import video_control_actions
@@ -1508,6 +1509,117 @@ class SaveJobDialog(QtWidgets.QDialog):
             name = self.output_name_edit.text().strip()
             return name if name else None  # Return None if empty, job_name will be used
         return None  # Return None if checkbox is checked
+
+
+class FindFaceDialog(QtWidgets.QDialog):
+    def __init__(self, main_window: "MainWindow", parent_path: str):
+        super().__init__(main_window)
+        self.main_window = main_window
+        self.parent_path = parent_path
+        self.selected_folder = ""
+        self.all_folders = []
+        
+        self.setWindowTitle("查找人脸")
+        self.setWindowIcon(QtGui.QIcon(":/media/media/visomaster_small.png"))
+        self.setMinimumSize(400, 500)
+        self.setModal(True)
+        
+        # 创建控件
+        self.search_label = QtWidgets.QLabel("搜索:")
+        self.search_edit = QtWidgets.QLineEdit(self)
+        self.search_edit.setPlaceholderText("输入拼音、汉字或字符搜索...")
+        self.search_edit.textChanged.connect(self.filter_folders)
+        self.search_edit.setMaximumWidth(250)
+        
+        # 创建全选按钮
+        self.select_all_button = QtWidgets.QPushButton("全选", self)
+        self.select_all_button.clicked.connect(self.select_all_folders)
+        
+        # 创建搜索和全选的水平布局
+        search_layout = QtWidgets.QHBoxLayout()
+        search_layout.addWidget(self.search_label)
+        search_layout.addWidget(self.search_edit)
+        search_layout.addWidget(self.select_all_button)
+        search_layout.addStretch()
+        
+        self.folder_list = QtWidgets.QListWidget(self)
+        self.folder_list.itemDoubleClicked.connect(self.select_folder)
+        
+        # 创建按钮框
+        QBtn = QtWidgets.QDialogButtonBox.Cancel
+        self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
+        self.buttonBox.rejected.connect(self.reject)
+        
+        # 创建布局并添加控件
+        layout = QtWidgets.QVBoxLayout()
+        layout.addLayout(search_layout)
+        layout.addWidget(QtWidgets.QLabel("人脸文件夹:"))
+        layout.addWidget(self.folder_list)
+        layout.addWidget(self.buttonBox)
+        
+        # 设置对话框布局
+        self.setLayout(layout)
+        
+        # 加载文件夹列表
+        self.load_folders()
+    
+    def get_pinyin(self, text, initials=False):
+        """获取文本的拼音表示
+        
+        Args:
+            text: 要转换的文本
+            initials: 是否只返回拼音首字母
+        """
+        try:
+            pinyin_list = lazy_pinyin(text)
+            if initials:
+                initials_list = [p[0] if p else '' for p in pinyin_list]
+                pinyin_text = ''.join(initials_list).lower()
+            else:
+                pinyin_text = ''.join(pinyin_list).lower()
+            return pinyin_text
+        except Exception:
+            return text.lower()
+    
+    def load_folders(self):
+        """加载父目录下的所有子文件夹"""
+        self.folder_list.clear()
+        self.all_folders = []
+        
+        if not os.path.exists(self.parent_path):
+            return
+        
+        try:
+            for item in os.listdir(self.parent_path):
+                item_path = os.path.join(self.parent_path, item)
+                if os.path.isdir(item_path):
+                    self.all_folders.append(item)
+                    list_item = QtWidgets.QListWidgetItem(item)
+                    self.folder_list.addItem(list_item)
+        except Exception as e:
+            pass
+    
+    def filter_folders(self):
+        """根据搜索文本过滤文件夹列表"""
+        search_text = self.search_edit.text().lower()
+        
+        self.folder_list.clear()
+        
+        for folder in self.all_folders:
+            folder_lower = folder.lower()
+            folder_pinyin = self.get_pinyin(folder, initials=False)
+            folder_pinyin_initials = self.get_pinyin(folder, initials=True)
+            
+            if (search_text in folder_lower or 
+                search_text in folder_pinyin or
+                search_text in folder_pinyin_initials):
+                list_item = QtWidgets.QListWidgetItem(folder)
+                self.folder_list.addItem(list_item)
+    
+    def select_folder(self, item):
+        """选择文件夹并关闭对话框"""
+        self.selected_folder = os.path.join(self.parent_path, item.text())
+        self.accept()
 
 
 class ParametersWidget:

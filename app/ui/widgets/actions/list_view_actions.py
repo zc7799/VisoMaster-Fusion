@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Dict, Type
 import subprocess
 import sys
 import os
+from pathlib import Path
 
 from PySide6 import QtWidgets, QtGui, QtCore
 
@@ -341,15 +342,19 @@ def clear_stop_loading_input_media(main_window: "MainWindow"):
 
 @QtCore.Slot()
 def select_input_face_images(
-    main_window: "MainWindow", source_type="folder", folder_name=False, files_list=None
+    main_window: "MainWindow", source_type="folder", folder_name=False, files_list=None, skip_dialog=False
 ):
     files_list = files_list or []
     if source_type == "folder":
-        folder_name = QtWidgets.QFileDialog.getExistingDirectory(
-            dir=main_window.last_input_media_folder_path
-        )
-        if not folder_name:
-            return
+        if not skip_dialog:
+            folder_name = QtWidgets.QFileDialog.getExistingDirectory(
+                dir=main_window.last_input_media_folder_path
+            )
+            if not folder_name:
+                return
+        else:
+            if not folder_name:
+                return
         main_window.labelInputFacesPath.setText(misc_helpers.truncate_text(folder_name))
         main_window.labelInputFacesPath.setToolTip(folder_name)
         main_window.last_input_media_folder_path = folder_name
@@ -509,3 +514,35 @@ def show_presets(main_window: "MainWindow"):
         presets_text,
         main_window,
     )
+
+
+@QtCore.Slot()
+def show_find_face_dialog(main_window: "MainWindow"):
+    """显示查找人脸对话框"""
+    current_path = main_window.last_input_media_folder_path
+    
+    if not current_path or not os.path.exists(current_path):
+        common_widget_actions.create_and_show_messagebox(
+            main_window,
+            "提示",
+            "请先选择一个输入人脸文件夹！",
+            main_window,
+        )
+        return
+    
+    parent_path = os.path.dirname(current_path)
+    
+    if not os.path.exists(parent_path):
+        common_widget_actions.create_and_show_messagebox(
+            main_window,
+            "提示",
+            "无法获取上级目录！",
+            main_window,
+        )
+        return
+    
+    dialog = widget_components.FindFaceDialog(main_window, parent_path)
+    
+    if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+        if dialog.selected_folder:
+            select_input_face_images(main_window, source_type="folder", folder_name=dialog.selected_folder, skip_dialog=True)
