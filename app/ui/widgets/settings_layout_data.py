@@ -139,6 +139,12 @@ SETTINGS_LAYOUT_DATA: Any = {  # noqa: F811
             "default": False,
             "help": "录制结束后打开输出文件夹。",
         },
+        "SaveToSubdirectoryToggle": {
+            "level": 1,
+            "label": "保存到子目录",
+            "default": False,
+            "help": "将视频保存在输出目录下的人脸名称子目录中。",
+        },
         "HDREncodeToggle": {
             "level": 1,
             "label": "HDR 编码 - 仅在 HDR 视频上使用 (CPU)",

@@ -1658,6 +1658,8 @@ class VideoProcessor(QObject):
                 job_name=job_name,
                 use_job_name_for_output=use_job_name,
                 output_file_name=output_file_name,
+                save_to_subdirectory=self.main_window.control.get("SaveToSubdirectoryToggle", False),
+                input_face_path=self.main_window.last_input_media_folder_path,
             )
 
             output_dir = os.path.dirname(final_file_path)
@@ -1790,7 +1792,10 @@ class VideoProcessor(QObject):
 
         if self.main_window.control["AutoSaveWorkspaceToggle"]:
             json_file_path = misc_helpers.get_output_file_path(
-                self.media_path, self.main_window.control["OutputMediaFolder"]
+                self.media_path, 
+                self.main_window.control["OutputMediaFolder"],
+                save_to_subdirectory=self.main_window.control.get("SaveToSubdirectoryToggle", False),
+                input_face_path=self.main_window.last_input_media_folder_path,
             )
             json_file_path += ".json"
             save_load_actions.save_current_workspace(self.main_window, json_file_path)
@@ -2283,6 +2288,8 @@ class VideoProcessor(QObject):
             job_name=job_name,
             use_job_name_for_output=use_job_name,
             output_file_name=output_file_name,
+            save_to_subdirectory=self.main_window.control.get("SaveToSubdirectoryToggle", False),
+            input_face_path=self.main_window.last_input_media_folder_path,
         )
 
         output_dir = os.path.dirname(final_file_path)

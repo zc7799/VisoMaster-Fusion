@@ -1086,6 +1086,8 @@ def save_current_frame_to_file(main_window: "MainWindow"):
             main_window.video_processor.media_path,
             str(main_window.control["OutputMediaFolder"]),
             media_type=image_format,
+            save_to_subdirectory=main_window.control.get("SaveToSubdirectoryToggle", False),
+            input_face_path=main_window.last_input_media_folder_path,
         )
         if save_filename:
             # frame is main_window.video_processor.current_frame, which is already RGB.
@@ -1380,6 +1382,8 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
                         media_path,
                         str(main_window.control["OutputMediaFolder"]),
                         media_type=image_format,
+                        save_to_subdirectory=main_window.control.get("SaveToSubdirectoryToggle", False),
+                        input_face_path=main_window.last_input_media_folder_path,
                     )
 
                     if save_filename:
