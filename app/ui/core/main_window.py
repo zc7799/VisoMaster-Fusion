@@ -478,9 +478,20 @@ class Ui_MainWindow(object):
         self.horizontalLayout_Faces.addWidget(self.buttonFindFace)
         self.gridLayout_Faces1.addLayout(self.horizontalLayout_Faces, 0, 0, 1, 1)
         self.vboxLayout_Faces.addWidget(self.groupBox_InputFaces_Select)
+        
+        # 创建搜索框和全选按钮的水平布局
+        self.searchLayout_Faces = QHBoxLayout()
+        self.searchLayout_Faces.setObjectName(u"searchLayout_Faces")
         self.inputFacesSearchBox = QLineEdit(self.dockWidgetContents_Faces)
         self.inputFacesSearchBox.setObjectName(u"inputFacesSearchBox")
-        self.vboxLayout_Faces.addWidget(self.inputFacesSearchBox)
+        self.inputFacesSearchBox.setMaximumWidth(250)
+        self.searchLayout_Faces.addWidget(self.inputFacesSearchBox)
+        self.selectInputFacesButton = QPushButton(self.dockWidgetContents_Faces)
+        self.selectInputFacesButton.setObjectName(u"selectInputFacesButton")
+        self.selectInputFacesButton.setText("全选")
+        self.searchLayout_Faces.addWidget(self.selectInputFacesButton)
+        
+        self.vboxLayout_Faces.addLayout(self.searchLayout_Faces)
         self.inputFacesList = QListWidget(self.dockWidgetContents_Faces)
         self.inputFacesList.setObjectName(u"inputFacesList")
         self.inputFacesList.setAcceptDrops(True)

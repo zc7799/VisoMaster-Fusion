@@ -294,6 +294,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.inputFacesSearchBox.textChanged.connect(
             partial(filter_actions.filter_input_faces, self)
         )
+        self.selectInputFacesButton.clicked.connect(
+            partial(filter_actions.select_all_input_faces, self)
+        )
         self.inputEmbeddingsSearchBox.textChanged.connect(
             partial(filter_actions.filter_merged_embeddings, self)
         )
