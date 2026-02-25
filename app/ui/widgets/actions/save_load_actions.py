@@ -415,6 +415,20 @@ def load_saved_workspace(
             main_window.last_input_media_folder_path = data.get(
                 "last_input_media_folder_path", ""
             )
+            
+            # Update UI labels with folder paths
+            if main_window.last_target_media_folder_path:
+                main_window.labelTargetVideosPath.setText(
+                    misc_helpers.truncate_text(main_window.last_target_media_folder_path)
+                )
+                main_window.labelTargetVideosPath.setToolTip(main_window.last_target_media_folder_path)
+            
+            if main_window.last_input_media_folder_path:
+                main_window.labelInputFacesPath.setText(
+                    misc_helpers.truncate_text(main_window.last_input_media_folder_path)
+                )
+                main_window.labelInputFacesPath.setToolTip(main_window.last_input_media_folder_path)
+            
             main_window.loaded_embedding_filename = data.get(
                 "loaded_embedding_filename", ""
             )
