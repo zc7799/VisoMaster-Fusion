@@ -87,8 +87,8 @@ class FaceMasks:
         is_lazy_build = self.models_processor.check_and_clear_pending_build(model_name)
         if is_lazy_build:
             self.models_processor.show_build_dialog.emit(
-                "Finalizing TensorRT Build",
-                f"Performing first-run inference for:\n{model_name}\n\nThis may take several minutes.",
+                "完成TensorRT构建",
+                f"正在执行首次推理：\n{model_name}\n\n这可能需要几分钟时间。",
             )
 
         try:
@@ -819,8 +819,8 @@ class FaceMasks:
         is_lazy_build = self.models_processor.check_and_clear_pending_build(model_name)
         if is_lazy_build:
             self.models_processor.show_build_dialog.emit(
-                "Finalizing TensorRT Build",
-                f"Performing first-run inference for:\n{model_name}\n\nThis may take several minutes.",
+                "完成TensorRT构建",
+                f"正在执行首次推理：\n{model_name}\n\n这可能需要几分钟时间。",
             )
 
         try:
@@ -1026,8 +1026,8 @@ class FaceMasks:
         is_lazy_build = self.models_processor.check_and_clear_pending_build(model_name)
         if is_lazy_build:
             self.models_processor.show_build_dialog.emit(
-                "Finalizing TensorRT Build",
-                f"Performing first-run inference for:\n{model_name}\n\nThis may take several minutes.",
+                "完成TensorRT构建",
+                f"正在执行首次推理：\n{model_name}\n\n这可能需要几分钟时间。",
             )
 
         try:
@@ -1068,8 +1068,8 @@ class FaceMasks:
         is_lazy_build = self.models_processor.check_and_clear_pending_build(model_key)
         if is_lazy_build:
             self.models_processor.show_build_dialog.emit(
-                "Finalizing TensorRT Build",
-                f"Performing first-run inference for:\n{model_key}\n\nThis may take several minutes.",
+                "完成TensorRT构建",
+                f"正在执行首次推理：\n{model_key}\n\n这可能需要几分钟时间。",
             )
 
         try:

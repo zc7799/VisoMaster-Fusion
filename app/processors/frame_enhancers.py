@@ -73,8 +73,8 @@ class FrameEnhancers:
         if is_lazy_build:
             # Show a "please wait" dialog to the user
             self.models_processor.show_build_dialog.emit(
-                "Finalizing TensorRT Build",
-                f"Performing first-run inference for:\n{model_name}\n\nThis may take several minutes.",
+                "完成TensorRT构建",
+                f"正在执行首次推理：\n{model_name}\n\n这可能需要几分钟时间。",
             )
 
         try:

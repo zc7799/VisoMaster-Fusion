@@ -21,8 +21,8 @@ def handle_preset_double_click(main_window: "MainWindow", item: "QListWidgetItem
     """Handle double click on preset item by showing confirmation dialog"""
     result = QtWidgets.QMessageBox.question(
         main_window,
-        "Apply Preset",
-        f"Do you want to apply preset: {item.text()}?",
+        "应用预设",
+        f"您想要应用预设：{item.text()}吗？",
         QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
     )
 
@@ -34,7 +34,7 @@ def rename_preset(main_window: "MainWindow", item: "QListWidgetItem"):
     """Rename the selected preset"""
     old_name = item.text()
     new_name, ok = QtWidgets.QInputDialog.getText(
-        main_window, "Rename Preset", "Enter new name:", text=old_name
+        main_window, "重命名预设", "输入新名称：", text=old_name
     )
 
     if ok and new_name and new_name != old_name:
@@ -46,8 +46,8 @@ def rename_preset(main_window: "MainWindow", item: "QListWidgetItem"):
         if new_path.exists():
             QtWidgets.QMessageBox.warning(
                 main_window,
-                "Name Exists",
-                f"A preset named '{new_name}' already exists.",
+                "名称已存在",
+                f"名为'{new_name}'的预设已经存在。",
                 QtWidgets.QMessageBox.Ok,
             )
             return
@@ -58,14 +58,14 @@ def rename_preset(main_window: "MainWindow", item: "QListWidgetItem"):
             refresh_presets_list(main_window)
             common_widget_actions.create_and_show_toast_message(
                 main_window,
-                "Preset Renamed",
-                f"Renamed preset: {old_name} to {new_name}",
+                "预设已重命名",
+                f"已将预设从 {old_name} 重命名为 {new_name}",
             )
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 main_window,
-                "Error",
-                f"Failed to rename preset: {str(e)}",
+                "错误",
+                f"重命名预设失败：{str(e)}",
                 QtWidgets.QMessageBox.Ok,
             )
 
@@ -85,8 +85,8 @@ def delete_preset(main_window: "MainWindow", item: "QListWidgetItem"):
     except Exception as e:
         QtWidgets.QMessageBox.critical(
             main_window,
-            "Error",
-            f"Failed to delete preset: {str(e)}",
+            "错误",
+            f"删除预设失败：{str(e)}",
             QtWidgets.QMessageBox.Ok,
         )
 
@@ -96,8 +96,8 @@ def show_preset_context_menu(main_window: "MainWindow", position):
     item = main_window.presetsList.itemAt(position)
     if item:
         menu = QtWidgets.QMenu()
-        rename_action = menu.addAction("Rename")
-        delete_action = menu.addAction("Delete")
+        rename_action = menu.addAction("重命名")
+        delete_action = menu.addAction("删除")
         action = menu.exec_(main_window.presetsList.viewport().mapToGlobal(position))
 
         if action == rename_action:
@@ -138,8 +138,8 @@ def save_current_as_preset(main_window: "MainWindow"):
     if selected_count > 1:
         QtWidgets.QMessageBox.warning(
             main_window,
-            "Selection error.",
-            "Select only one preset to overwrite or deselect all to create a new preset.",
+            "选择错误",
+            "请只选择一个预设进行覆盖，或取消选择所有预设以创建新预设。",
             QtWidgets.QMessageBox.Ok,
         )
         return
@@ -147,15 +147,15 @@ def save_current_as_preset(main_window: "MainWindow"):
     if selected_count == 0:
         while True:
             name, ok = QtWidgets.QInputDialog.getText(
-                main_window, "Save Preset", "Enter preset name:"
+                main_window, "保存预设", "输入预设名称："
             )
             if not ok or not name:
                 return
             if name in preset_name_list:
                 ok = QtWidgets.QMessageBox.question(
                     main_window,
-                    "Confirm Overwrite",
-                    f"Preset: {name} already exists, overwrite ?",
+                    "确认覆盖",
+                    f"预设：{name} 已存在，是否覆盖？",
                     QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 )
                 if ok == QtWidgets.QMessageBox.Yes:
@@ -169,11 +169,11 @@ def save_current_as_preset(main_window: "MainWindow"):
         current_item = main_window.presetsList.currentItem()
         name = current_item.text()
         ok = QtWidgets.QMessageBox.question(
-            main_window,
-            "Confirm Overwrite",
-            f"Are you sure you want to overwrite preset: {name}?",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-        )
+                main_window,
+                "确认覆盖",
+                f"您确定要覆盖预设：{name}吗？",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            )
         if ok == QtWidgets.QMessageBox.Yes:
             ok = True
         if ok == QtWidgets.QMessageBox.No:
@@ -210,7 +210,7 @@ def save_current_as_preset(main_window: "MainWindow"):
             json.dump(current_ctl, c, indent=4)
         refresh_presets_list(main_window)
         common_widget_actions.create_and_show_toast_message(
-            main_window, "Preset Saved", f"Saved preset: {name}"
+            main_window, "预设已保存", f"已保存预设：{name}"
         )
 
 
@@ -282,5 +282,5 @@ def apply_selected_preset(main_window: "MainWindow"):
     # Refresh the frame to show changes
     common_widget_actions.refresh_frame(main_window)
     common_widget_actions.create_and_show_toast_message(
-        main_window, "Preset Applied", f"Applied preset: {current_item.text()}"
+        main_window, "预设已应用", f"已应用预设：{current_item.text()}"
     )

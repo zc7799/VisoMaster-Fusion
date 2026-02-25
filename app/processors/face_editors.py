@@ -144,8 +144,8 @@ class FaceEditors:
         if is_lazy_build:
             # Use the 'model_name' variable for a reliable dialog message
             self.models_processor.show_build_dialog.emit(
-                "Finalizing TensorRT Build",
-                f"Performing first-run inference for:\n{model_name}\n\nThis may take several minutes.",
+                "完成TensorRT构建",
+                f"正在执行首次推理：\n{model_name}\n\n这可能需要几分钟时间。",
             )
 
         try:

@@ -1231,7 +1231,7 @@ class EmbeddingCardButton(CardButton):
     def create_context_menu(self):
         # create context menu
         self.popMenu = QtWidgets.QMenu(self)
-        remove_action = QtGui.QAction("Remove Embedding", self)
+        remove_action = QtGui.QAction("移除嵌入", self)
         remove_action.triggered.connect(self.remove_embedding_from_list)
         self.popMenu.addAction(remove_action)
 
@@ -1399,7 +1399,7 @@ class LoadLastWorkspaceDialog(QtWidgets.QDialog):
 
         # Create layout and add widgets
         layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(QtWidgets.QLabel("Do you want to load your last workspace?"))
+        layout.addWidget(QtWidgets.QLabel("您想要加载上次的工作空间吗？"))
         layout.addWidget(self.buttonBox)
 
         # Set dialog layout
