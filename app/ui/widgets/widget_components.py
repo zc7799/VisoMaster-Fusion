@@ -853,8 +853,8 @@ class TargetFaceCardButton(CardButton):
         if not self.main_window.copied_parameters:
             common_widget_actions.create_and_show_messagebox(
                 self.main_window,
-                "No parameters found in Clipboard",
-                "You need to copy parameters from any of the target face before pasting it!",
+                "剪贴板中未找到参数",
+                "您需要先从任何目标人脸复制参数，然后才能粘贴！",
                 parent_widget=self,
             )
         else:
@@ -1137,8 +1137,8 @@ class InputFaceCardButton(CardButton):
         if len(selected_faces_embeddings_store) == 0:
             common_widget_actions.create_and_show_messagebox(
                 self.main_window,
-                "No Faces Selected!",
-                "You need to select at least one face to create a merged embedding!",
+                "未选择人脸！",
+                "您需要至少选择一个人脸来创建合并的嵌入！",
                 self,
             )
         else:

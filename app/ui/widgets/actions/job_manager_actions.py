@@ -144,7 +144,7 @@ def save_job(
     except Exception as e:
         print(f"[ERROR] Failed to save job: {e}")
         QMessageBox.critical(
-            main_window, "Save Error", f"Failed to save job '{job_name}':\n{e}"
+            main_window, "保存错误", f"保存作业 '{job_name}' 失败：\n{e}"
         )
 
 
@@ -164,17 +164,17 @@ def delete_job(main_window: "MainWindow") -> bool:
     selected_jobs = get_selected_jobs(main_window)
     if not selected_jobs:
         QMessageBox.warning(
-            main_window, "No Job Selected", "Please select one or more jobs to delete."
+            main_window, "未选择作业", "请选择一个或多个作业进行删除。"
         )
         return False
 
     # Confirm deletion with the user
     confirm = QMessageBox.question(
         main_window,
-        "Confirm Deletion",
-        f"Are you sure you want to delete the selected job{'s' if len(selected_jobs) > 1 else ''}?\n\n"
+        "确认删除",
+        f"您确定要删除选定的作业{'s' if len(selected_jobs) > 1 else ''}吗？\n\n"
         + ", ".join(selected_jobs)
-        + "\n\n(Files will be moved to the Recycle Bin)",
+        + "\n\n（文件将被移动到回收站）",
         QMessageBox.Yes | QMessageBox.No,
     )
     if confirm != QMessageBox.Yes:
@@ -192,8 +192,8 @@ def delete_job(main_window: "MainWindow") -> bool:
                 print(f"[ERROR] Failed to move job to trash: {e}")
                 QMessageBox.warning(
                     main_window,
-                    "Delete Error",
-                    f"Could not move job '{job_name}' to trash:\n{e}",
+                    "删除错误",
+                    f"无法将作业 '{job_name}' 移动到回收站：\n{e}",
                 )
         else:
             print(f"[ERROR] Job file not found for deletion: {job_file}")
@@ -201,12 +201,12 @@ def delete_job(main_window: "MainWindow") -> bool:
     if deleted_any:
         refresh_job_list(main_window)  # Update the UI list
         common_widget_actions.create_and_show_toast_message(
-            main_window, "Job(s) Deleted", "Selected jobs moved to Recycle Bin."
+            main_window, "作业已删除", "选定的作业已移动到回收站。"
         )
         return True
     else:
         QMessageBox.warning(
-            main_window, "Job(s) Not Found", "None of the selected jobs exist."
+            main_window, "未找到作业", "选定的作业都不存在。"
         )
         return False
 
@@ -221,14 +221,14 @@ def load_job(main_window: "MainWindow"):
     selected_jobs = get_selected_jobs(main_window)
     if not selected_jobs:
         QMessageBox.warning(
-            main_window, "No Job Selected", "Please select a job from the list."
+            main_window, "未选择作业", "请从列表中选择一个作业。"
         )
         return
     if len(selected_jobs) > 1:
         QMessageBox.warning(
             main_window,
-            "Multiple Jobs Selected",
-            "You can only load one job at a time. Please select a single job to load.",
+            "选择了多个作业",
+            "一次只能加载一个作业。请选择单个作业进行加载。",
         )
         return
 
@@ -622,7 +622,7 @@ def load_job_workspace(main_window: "MainWindow", job_name: str):
     if not Path(data_filename).is_file():
         print(f"[ERROR] No valid file found for job: {job_name}.")
         QMessageBox.critical(
-            main_window, "Load Error", f"Job file not found:\n{data_filename}"
+            main_window, "加载错误", f"未找到作业文件：\n{data_filename}"
         )
         return
 
@@ -632,7 +632,7 @@ def load_job_workspace(main_window: "MainWindow", job_name: str):
     except Exception as e:
         print(f"[ERROR] Failed to read or parse job file {data_filename}: {e}")
         QMessageBox.critical(
-            main_window, "Load Error", f"Failed to load job '{job_name}':\n{e}"
+            main_window, "加载错误", f"加载作业 '{job_name}' 失败：\n{e}"
         )
         return
 
@@ -642,8 +642,8 @@ def load_job_workspace(main_window: "MainWindow", job_name: str):
         print(f"[ERROR] Cannot load job '{job_name}'. Reason: {error_msg}")
         QMessageBox.critical(
             main_window,
-            "Load Error",
-            f"Failed to load job '{job_name}':\n\n{error_msg}",
+            "加载错误",
+            f"加载作业 '{job_name}' 失败：\n\n{error_msg}",
         )
         return  # Abort loading
 
@@ -774,8 +774,8 @@ def load_job_workspace(main_window: "MainWindow", job_name: str):
         traceback.print_exc()
         QMessageBox.critical(
             main_window,
-            "Load Error",
-            f"An error occurred while loading job '{job_name}':\n{e}",
+            "加载错误",
+            f"加载作业 '{job_name}' 时发生错误：\n{e}",
         )
     finally:
         progress_dialog.close()
@@ -792,8 +792,8 @@ def _restore_workspace_from_snapshot(main_window: "MainWindow", data: dict):
         print("[ERROR] Workspace snapshot data is empty. Cannot restore.")
         QMessageBox.critical(
             main_window,
-            "Restore Error",
-            "Failed to restore workspace: Snapshot data was empty.",
+            "恢复错误",
+            "恢复工作区失败：快照数据为空。",
         )
         return
 
@@ -932,8 +932,8 @@ def _restore_workspace_from_snapshot(main_window: "MainWindow", data: dict):
         traceback.print_exc()
         QMessageBox.critical(
             main_window,
-            "Restore Error",
-            f"An error occurred while restoring the workspace:\n{e}",
+            "恢复错误",
+            f"恢复工作区时发生错误：\n{e}",
         )
     finally:
         progress_dialog.close()
@@ -1136,8 +1136,8 @@ def prompt_job_name(main_window: "MainWindow"):
     if not has_target_face:
         reply = QMessageBox.warning(
             main_window,
-            "Confirm Save",
-            "No target faces found!\nNo face swaps will happen for this job. Proceed anyway?",
+            "确认保存",
+            "未找到目标人脸！\n此作业不会进行任何换脸操作。是否继续？",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -1148,8 +1148,8 @@ def prompt_job_name(main_window: "MainWindow"):
     if not output_folder:
         QMessageBox.warning(
             main_window,
-            "Workspace Not Ready",
-            "An Output Folder must be set in the 'Settings' tab before saving a job.",
+            "工作区未就绪",
+            "在保存作业之前，必须在‘设置‘选项卡中设置输出文件夹。",
         )
         return
 
@@ -1167,9 +1167,9 @@ def prompt_job_name(main_window: "MainWindow"):
     if not at_least_one_target_has_input:
         reply = QMessageBox.warning(
             main_window,
-            "Confirm Save",
-            "No input faces or embeddings are assigned to ANY target face!\n"
-            "No face swaps will happen for this job. Proceed anyway?",
+            "确认保存",
+            "没有为任何目标人脸分配输入人脸或嵌入！\n"
+            "此作业不会进行任何换脸操作。是否继续？",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -1186,14 +1186,14 @@ def prompt_job_name(main_window: "MainWindow"):
         # Validate job name
         if not job_name:
             QMessageBox.warning(
-                main_window, "Invalid Job Name", "Job name cannot be empty."
+                main_window, "无效的作业名称", "作业名称不能为空。"
             )
             return
         if not re.match(r"^[\w\- ]+$", job_name):
             QMessageBox.warning(
                 main_window,
-                "Invalid Job Name",
-                "Job name contains invalid characters. Only letters, numbers, spaces, dashes, and underscores are allowed.",
+                "无效的作业名称",
+                "作业名称包含无效字符。仅允许字母、数字、空格、连字符和下划线。",
             )
             return
 
@@ -1202,9 +1202,9 @@ def prompt_job_name(main_window: "MainWindow"):
             if not re.match(r"^[\w\- ]+$", output_file_name):
                 QMessageBox.warning(
                     main_window,
-                    "Invalid Output File Name",
-                    "Output file name contains invalid characters.\n"
-                    "Only letters, numbers, spaces, dashes, and underscores are allowed.",
+                    "无效的输出文件名",
+                    "输出文件名包含无效字符。\n"
+                    "仅允许字母、数字、空格、连字符和下划线。",
                 )
                 return
 
@@ -1321,8 +1321,8 @@ def load_master_assets(main_window: "MainWindow", master_data: dict):
         traceback.print_exc()
         QMessageBox.critical(
             main_window,
-            "Load Error",
-            f"An error occurred while loading batch assets:\n{e}",
+            "加载错误",
+            f"加载批量资产时发生错误：\n{e}",
         )
     finally:
         progress_dialog.close()
@@ -1390,8 +1390,8 @@ def load_job_settings(main_window: "MainWindow", job_data: dict):
         traceback.print_exc()
         QMessageBox.critical(
             main_window,
-            "Load Error",
-            f"An error occurred while loading settings for job:\n{e}",
+            "加载错误",
+            f"加载作业设置时发生错误：\n{e}",
         )
     finally:
         # Allow pending UI events to process before signaling completion
@@ -1452,9 +1452,9 @@ def handle_batch_completion(main_window: "MainWindow"):
             traceback.print_exc()
             QMessageBox.critical(
                 main_window,
-                "Restore Error",
-                f"Failed to restore workspace: {e}\n"
-                "The UI may be in an unstable state. Please restart.",
+                "恢复错误",
+                f"恢复工作区失败：{e}\n"
+                "UI 可能处于不稳定状态。请重新启动。",
             )
         finally:
             main_window.workspace_snapshot_before_batch = None  # Clear snapshot
@@ -1468,24 +1468,24 @@ def handle_batch_completion(main_window: "MainWindow"):
 
     # Report skipped jobs (if any)
     if skipped_jobs:
-        skipped_message = "The following jobs were skipped due to errors:\n\n"
+        skipped_message = "由于错误，以下作业被跳过：\n\n"
         skipped_message += "\n".join(f"- {job_error}" for job_error in skipped_jobs)
-        QMessageBox.warning(main_window, "Skipped Jobs", skipped_message)
+        QMessageBox.warning(main_window, "跳过的作业", skipped_message)
 
     # Report final status
     if batch_succeeded:
         QMessageBox.information(
             main_window,
-            "Job Processing Complete",
-            "All valid jobs have finished processing.",
+            "作业处理完成",
+            "所有有效的作业都已完成处理。",
         )
     else:
         # Batch failed
         QMessageBox.warning(
             main_window,
-            "Job Processing Failed",
-            "The job batch finished with errors. Please check the log for details. "
-            "Any jobs that failed were not moved to 'completed'.",
+            "作业处理失败",
+            "作业批处理完成时出现错误。请检查日志以获取详细信息。 "
+            "任何失败的作业都不会被移动到‘已完成‘。",
         )
     # Clean up the job processor to prevent "zombie listeners"
     if main_window.job_processor:
@@ -1520,7 +1520,7 @@ def process_selected_job(main_window: "MainWindow"):
     selected_jobs = get_selected_jobs(main_window)
     if not selected_jobs:
         QMessageBox.warning(
-            main_window, "No Job Selected", "Please select one or more jobs to process."
+            main_window, "未选择作业", "请选择一个或多个作业进行处理。"
         )
         return
 
@@ -1542,7 +1542,7 @@ def start_job_processor(main_window: "MainWindow", jobs_to_process: list[str] | 
     # Ensure no other processor is running
     if main_window.job_processor and main_window.job_processor.isRunning():
         QMessageBox.warning(
-            main_window, "Already Processing", "A job processor is already running."
+            main_window, "正在处理", "作业处理器已在运行。"
         )
         return
 

@@ -511,10 +511,10 @@ class LauncherWindow(QtWidgets.QWidget):
 
         confirm = QtWidgets.QMessageBox.question(
             self,
-            "Confirm Branch Switch",
-            f"You are about to switch from '{current_branch}' to '{new_branch}'.\n\n"
-            "This will discard any local changes and synchronize with the new branch.\n"
-            "Are you sure you want to continue?",
+            "确认切换分支",
+            f"您即将从 '{current_branch}' 切换到 '{new_branch}'。\n\n"
+            "这将丢弃所有本地更改并与新分支同步。\n"
+            "您确定要继续吗？",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
         )
 
@@ -543,15 +543,15 @@ class LauncherWindow(QtWidgets.QWidget):
 
                 QtWidgets.QMessageBox.information(
                     self,
-                    "Branch Switched",
-                    f"Successfully switched to the '{new_branch}' branch.\n\n"
-                    "It is highly recommended to run 'Check / Update Dependencies' now.",
+                    "分支已切换",
+                    f"已成功切换到 '{new_branch}' 分支。\n\n"
+                    '强烈建议现在运行"检查/更新依赖"。',
                 )
 
             except Exception as e:
                 print(f"[Launcher] Error during branch switch: {e}")
                 QtWidgets.QMessageBox.critical(
-                    self, "Error", f"Failed to switch branch:\n{e}"
+                    self, "错误", f"切换分支失败：\n{e}"
                 )
                 # Revert config if it failed
                 write_portable_cfg({"BRANCH": current_branch})
@@ -575,8 +575,8 @@ class LauncherWindow(QtWidgets.QWidget):
                     self._refresh_update_indicators()
                     QMessageBox.information(
                         self,
-                        "Launcher Update Available",
-                        "The launcher script (Start_Portable.bat) has an update.\nPlease close the launcher and run Start_Portable.bat again to apply it.",
+                        "启动器更新可用",
+                        "启动器脚本 (Start_Portable.bat) 有更新。\n请关闭启动器并再次运行 Start_Portable.bat 以应用它。",
                     )
             except Exception as e:
                 print(f"[Launcher] Error during update: {e}")
@@ -584,10 +584,10 @@ class LauncherWindow(QtWidgets.QWidget):
     def on_repair_installation(self):
         confirm = QtWidgets.QMessageBox.question(
             self,
-            "Repair installation",
-            "Restore official app files for this version?\n\n"
-            "This will overwrite modified tracked files with the current version (HEAD).\n"
-            "Your personal files are not touched.",
+            "修复安装",
+            "恢复此版本的官方应用文件？\n\n"
+            "这将用当前版本 (HEAD) 覆盖修改过的跟踪文件。\n"
+            "您的个人文件不会被触及。",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
         )
         if confirm != QtWidgets.QMessageBox.Yes:
@@ -595,7 +595,7 @@ class LauncherWindow(QtWidgets.QWidget):
 
         changed = git_changed_files(True)
         if not changed:
-            QtWidgets.QMessageBox.information(self, "Repair", "No files to restore.")
+            QtWidgets.QMessageBox.information(self, "修复", "没有要恢复的文件。")
             print("[Launcher] Repair skipped — no changed files.")
             return
 
@@ -620,8 +620,8 @@ class LauncherWindow(QtWidgets.QWidget):
                     self._refresh_update_indicators()
                     QMessageBox.information(
                         self,
-                        "Launcher Update",
-                        "An update for the launcher script may be available after repair.",
+                        "启动器更新",
+                        "修复后启动器脚本可能有更新。",
                     )
                 print("[Launcher] Repair complete.")
             except Exception as e:
@@ -651,8 +651,8 @@ class LauncherWindow(QtWidgets.QWidget):
     def on_rollback(self, commit_hash: str):
         confirm = QtWidgets.QMessageBox.question(
             self,
-            "Confirm Revert",
-            f"Revert to commit {commit_hash}?\n\nThis will discard all local changes.",
+            "确认回退",
+            f"回退到提交 {commit_hash}？\n\n这将丢弃所有本地更改。",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
         )
         if confirm != QtWidgets.QMessageBox.Yes:

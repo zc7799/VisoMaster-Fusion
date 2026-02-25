@@ -178,8 +178,8 @@ def add_video_slider_marker(main_window: "MainWindow"):
     ):
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "Markers Not Available",
-            "Markers can only be used for videos!",
+            "标记不可用",
+            "标记只能用于视频！",
             main_window.videoSeekSlider,
         )
         return
@@ -188,15 +188,15 @@ def add_video_slider_marker(main_window: "MainWindow"):
     if not main_window.target_faces:
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "No Target Face Found",
-            "You need to have at least one target face to create a marker",
+            "未找到目标人脸",
+            "您需要至少有一个目标人脸才能创建标记",
             main_window.videoSeekSlider,
         )
     elif main_window.markers.get(current_position):
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "Marker Already Exists!",
-            "A Marker already exists for this position!",
+            "标记已存在！",
+            "该位置已存在标记！",
             main_window.videoSeekSlider,
         )
     else:
@@ -218,8 +218,8 @@ def show_add_marker_menu(main_window: "MainWindow"):
     ):
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "Markers Not Available",
-            "Markers can only be used for videos!",
+            "标记不可用",
+            "标记只能用于视频！",
             main_window.videoSeekSlider,
         )
         return
@@ -264,8 +264,8 @@ def set_job_start_frame(main_window: "MainWindow"):
     if main_window.job_marker_pairs and main_window.job_marker_pairs[-1][1] is None:
         QtWidgets.QMessageBox.warning(
             main_window,
-            "Invalid Action",
-            "Cannot add a new Start marker before completing the previous End marker.",
+            "无效操作",
+            "在完成上一个结束标记之前无法添加新的开始标记。",
         )
         return
 
@@ -288,8 +288,8 @@ def set_job_end_frame(main_window: "MainWindow"):
     ):
         QtWidgets.QMessageBox.critical(
             main_window,
-            "Error",
-            "Cannot set End marker without a preceding Start marker.",
+            "错误",
+            "在没有前置开始标记的情况下无法设置结束标记。",
         )
         return
 
@@ -300,8 +300,8 @@ def set_job_end_frame(main_window: "MainWindow"):
     if current_pos <= start_frame:
         QtWidgets.QMessageBox.warning(
             main_window,
-            "Invalid Position",
-            "Job end frame must be after the job start frame.",
+            "无效位置",
+            "作业结束帧必须在作业开始帧之后。",
         )
         return
 
@@ -322,8 +322,8 @@ def remove_video_slider_marker(main_window: "MainWindow"):
     ):
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "Markers Not Available",
-            "Markers can only be used for videos!",
+            "标记不可用",
+            "标记只能用于视频！",
             main_window.videoSeekSlider,
         )
         return
@@ -355,8 +355,8 @@ def remove_video_slider_marker(main_window: "MainWindow"):
     else:
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "No Marker Found!",
-            "No Marker Found for this position!",
+            "未找到标记！",
+            "该位置未找到标记！",
             main_window.videoSeekSlider,
         )
 
@@ -657,8 +657,8 @@ def record_video(main_window: "MainWindow", checked: bool):
         if video_processor.file_type == "webcam":
             common_widget_actions.create_and_show_messagebox(
                 main_window,
-                "Recording Not Supported",
-                "Recording webcam stream is not supported yet.",
+                "录制不支持",
+                "暂不支持录制摄像头流。",
                 main_window,
             )
         return
@@ -674,8 +674,8 @@ def record_video(main_window: "MainWindow", checked: bool):
         if not str(main_window.control.get("OutputMediaFolder", "")).strip():
             common_widget_actions.create_and_show_messagebox(
                 main_window,
-                "No Output Folder Selected",
-                "Please select an Output folder before recording!",
+                "未选择输出文件夹",
+                "请先选择输出文件夹再开始录制！",
                 main_window,
             )
             main_window.buttonMediaRecord.setChecked(False)  # Uncheck the button
@@ -683,8 +683,8 @@ def record_video(main_window: "MainWindow", checked: bool):
         if not misc_helpers.is_ffmpeg_in_path():
             common_widget_actions.create_and_show_messagebox(
                 main_window,
-                "FFMPEG Not Found",
-                "FFMPEG was not found in your system. Check installation!",
+                "未找到 FFMPEG",
+                "您的系统中未找到 FFMPEG。请检查安装！",
                 main_window,
             )
             main_window.buttonMediaRecord.setChecked(False)  # Uncheck the button
@@ -707,7 +707,7 @@ def record_video(main_window: "MainWindow", checked: bool):
             max_frame = video_processor.max_frame_number
             if max_frame is None or max_frame <= 0:
                 common_widget_actions.create_and_show_messagebox(
-                    main_window, "Error", "Cannot determine video length.", main_window
+                    main_window, "错误", "无法确定视频长度。", main_window
                 )
                 main_window.buttonMediaRecord.setChecked(False)
                 return
@@ -716,8 +716,8 @@ def record_video(main_window: "MainWindow", checked: bool):
             if current_frame >= max_frame:
                 common_widget_actions.create_and_show_messagebox(
                     main_window,
-                    "Recording Error",
-                    f"Cannot start recording from frame {current_frame}. Scrubber is at or past the end of the video ({max_frame}).",
+                    "录制错误",
+                    f"无法从帧 {current_frame} 开始录制。播放器已到达或超过视频末尾 ({max_frame})。",
                     main_window,
                 )
                 main_window.buttonMediaRecord.setChecked(False)
@@ -749,8 +749,8 @@ def record_video(main_window: "MainWindow", checked: bool):
                 if pair[1] is None:
                     common_widget_actions.create_and_show_messagebox(
                         main_window,
-                        "Incomplete Segment",
-                        f"Marker pair {i + 1} ({pair[0]}, None) is incomplete. Please set an End marker.",
+                        "不完整的片段",
+                        f"标记对 {i + 1} ({pair[0]}, None) 不完整。请设置结束标记。",
                         main_window,
                     )
                     main_window.buttonMediaRecord.setChecked(False)
@@ -758,8 +758,8 @@ def record_video(main_window: "MainWindow", checked: bool):
                 elif pair[0] >= pair[1]:
                     common_widget_actions.create_and_show_messagebox(
                         main_window,
-                        "Invalid Segment",
-                        f"Marker pair {i + 1} ({pair[0]}, {pair[1]}) is invalid. Start must be before End.",
+                        "无效的片段",
+                        f"标记对 {i + 1} ({pair[0]}, {pair[1]}) 无效。开始标记必须在结束标记之前。",
                         main_window,
                     )
                     main_window.buttonMediaRecord.setChecked(False)
@@ -1071,8 +1071,8 @@ def save_current_frame_to_file(main_window: "MainWindow"):
     if not main_window.outputFolderLineEdit.text():
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "No Output Folder Selected",
-            "Please select an Output folder to save the Images/Videos before Saving/Recording!",
+            "未选择输出文件夹",
+            "请先选择输出文件夹以保存图像/视频，然后再保存/录制！",
             main_window,
         )
         return
@@ -1108,8 +1108,8 @@ def save_current_frame_to_file(main_window: "MainWindow"):
     else:
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "Invalid Frame",
-            "Cannot save the current frame!",
+            "无效的帧",
+            "无法保存当前帧！",
             parent_widget=main_window.saveImageButton,
         )
 
@@ -1131,8 +1131,8 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
     if not main_window.outputFolderLineEdit.text():
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "No Output Folder Selected",
-            "Please select an Output folder to save the Images/Videos before Saving/Recording!",
+            "未选择输出文件夹",
+            "请先选择输出文件夹以保存图像/视频，然后再保存/录制！",
             main_window,
         )
         return
@@ -1170,8 +1170,8 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
     if not media_files_to_process:
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "No Media Found",
-            "No compatible images (or videos) found in the target list to process.",
+            "未找到媒体",
+            "目标列表中没有找到兼容的图像（或视频）可供处理。",
             main_window,
         )
         return
@@ -1194,28 +1194,26 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
     if not saved_input_faces and not saved_embeddings:
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "No Input Faces",
-            "Please select at least one Input Face or Embedding to use for swapping.",
+            "未选择输入人脸",
+            "请至少选择一个输入人脸或嵌入用于换脸。",
             main_window,
         )
         return
 
     # 4. Confirmation Dialog
     if process_all_faces:
-        confirm_title = "Confirm Batch Swap (All Faces)"
+        confirm_title = "确认批量换脸（所有人脸）"
         confirm_msg = (
-            f"Found {num_images} images in the target list.\n\n"
-            "This will find ALL faces in each image and process them using the "
-            "currently selected input faces and parameters.\n\n"
-            "Proceed with batch swap?"
+            f"在目标列表中找到 {num_images} 张图像。\n\n"
+            "这将在每张图像中找到所有人脸，并使用当前选定的输入人脸和参数进行处理。\n\n"
+            "是否继续批量换脸？"
         )
     else:
-        confirm_title = "Confirm Batch Swap (Current Config)"
+        confirm_title = "确认批量换脸（当前配置）"
         confirm_msg = (
-            f"Found {num_images} images and {num_videos} videos in the target list.\n\n"
-            "This will process each item using the current UI configuration "
-            "(Using the selected inputs faces and parameters on the selected Target Face).\n\n"
-            "Proceed with batch swap?"
+            f"在目标列表中找到 {num_images} 张图像和 {num_videos} 个视频。\n\n"
+            "这将使用当前 UI 配置处理每个项目（在选定的目标人脸上使用选定的输入人脸和参数）。\n\n"
+            "是否继续批量换脸？"
         )
 
     reply = QtWidgets.QMessageBox.question(
@@ -1472,7 +1470,7 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
             )
 
         common_widget_actions.create_and_show_messagebox(
-            main_window, "Batch Complete", result_msg, main_window
+            main_window, "批量处理完成", result_msg, main_window
         )
 
         # 10. Restore original state

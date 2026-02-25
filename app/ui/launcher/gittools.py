@@ -184,9 +184,9 @@ def trigger_self_update_if_needed(parent_widget=None):
     print("[Launcher] Start_Portable.bat update requested. Relaunching...")
     QMessageBox.information(
         parent_widget,
-        "Launcher Update Required",
-        "The launcher script (Start_Portable.bat) has been updated.\n\n"
-        "The application will now close and restart itself to apply the changes.",
+        "需要启动器更新",
+        "启动器脚本 (Start_Portable.bat) 已更新。\n\n"
+        "应用程序现在将关闭并重新启动以应用更改。",
     )
 
     updater_script_content = f"""
@@ -215,7 +215,7 @@ def trigger_self_update_if_needed(parent_widget=None):
     except Exception as e:
         print(f"[Launcher] ERROR: Could not write updater script: {e}")
         QMessageBox.critical(
-            parent_widget, "Update Error", f"Could not create the updater script:\n{e}"
+            parent_widget, "更新错误", f"无法创建更新脚本：\n{e}"
         )
         return
 

@@ -65,8 +65,8 @@ def save_embeddings_to_file(main_window: "MainWindow", save_as=False):
     if not main_window.merged_embeddings:
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "Embeddings List Empty!",
-            "No Embeddings available to save",
+            "嵌入列表为空！",
+            "没有可保存的嵌入",
             parent_widget=main_window,
         )
         return
@@ -721,8 +721,8 @@ def save_current_workspace(
             ):  # Don't show error for auto-save
                 common_widget_actions.create_and_show_messagebox(
                     main_window,
-                    "Save Error",
-                    f"Failed to save workspace:\\n{e}",
+                    "保存错误",
+                    f"保存工作区失败：\n{e}",
                     main_window,
                 )
 
@@ -731,12 +731,12 @@ def save_current_job(main_window: "MainWindow"):
     # Check for necessary conditions
     if not main_window.selected_video_button:
         common_widget_actions.create_and_show_messagebox(
-            main_window, "Error", "No target video selected.", main_window
+            main_window, "错误", "未选择目标视频。", main_window
         )
         return
     if not main_window.target_faces:
         common_widget_actions.create_and_show_messagebox(
-            main_window, "Error", "No target faces detected or assigned.", main_window
+            main_window, "错误", "未检测到或未分配目标人脸。", main_window
         )
         return
     if not any(
@@ -744,8 +744,8 @@ def save_current_job(main_window: "MainWindow"):
     ):
         common_widget_actions.create_and_show_messagebox(
             main_window,
-            "Error",
-            "No input faces assigned to any target face.",
+            "错误",
+            "未为任何目标人脸分配输入人脸。",
             main_window,
         )
         return
@@ -864,5 +864,5 @@ def save_current_job(main_window: "MainWindow"):
     except Exception as e:
         print(f"[ERROR] Failed to save job '{job_name}': {e}")
         common_widget_actions.create_and_show_messagebox(
-            main_window, "Save Job Error", f"Failed to save job:\n{e}", main_window
+            main_window, "保存作业错误", f"保存作业失败：\n{e}", main_window
         )

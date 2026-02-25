@@ -884,7 +884,7 @@ class EmbeddingGUI(QWidget):
     def save_file(self):
         selected_entries = self.get_selected_entries()
         if not selected_entries:
-            QMessageBox.warning(self, "No Selection", "No entries selected to save.")
+            QMessageBox.warning(self, "未选择", "未选择要保存的条目。")
             return
 
         all_widgets = self.entries_widget.get_all_widgets()
@@ -909,7 +909,7 @@ class EmbeddingGUI(QWidget):
 
     def save_as_file(self):
         if not self.embedding_data:
-            QMessageBox.warning(self, "No Data", "There is no data to save.")
+            QMessageBox.warning(self, "无数据", "没有可保存的数据。")
             return
 
         all_widgets = self.entries_widget.get_all_widgets()
@@ -947,9 +947,9 @@ class EmbeddingGUI(QWidget):
                         file.write(f"Name: {name}\n")
                         for value in values:
                             file.write(f"{value}\n")
-            QMessageBox.information(self, "Success", "File saved successfully.")
+            QMessageBox.information(self, "成功", "文件保存成功。")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save file: {e}")
+            QMessageBox.critical(self, "错误", f"保存文件失败：{e}")
 
     def delete_selected_entries(self):
         selected_widgets = self.get_selected_entries()
@@ -958,8 +958,8 @@ class EmbeddingGUI(QWidget):
 
         reply = QMessageBox.question(
             self,
-            "Confirm Deletion",
-            f"Are you sure you want to delete {len(selected_widgets)} selected item(s)?",
+            "确认删除",
+            f"您确定要删除 {len(selected_widgets)} 个选定项目吗？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1044,17 +1044,17 @@ class EmbeddingGUI(QWidget):
                 self.sorting_combo.setCurrentText("Manual")
                 QMessageBox.information(
                     self,
-                    "Paste Successful",
-                    f"{added_count} embedding(s) have been pasted.",
+                    "粘贴成功",
+                    f"已粘贴 {added_count} 个嵌入。",
                 )
             else:
                 QMessageBox.warning(
-                    self, "Paste", "No valid embeddings found in the clipboard."
+                    self, "粘贴", "剪贴板中未找到有效的嵌入。"
                 )
 
         except (json.JSONDecodeError, ValueError) as e:
             QMessageBox.critical(
-                self, "Paste Error", f"Could not paste embeddings: {e}"
+                self, "粘贴错误", f"无法粘贴嵌入：{e}"
             )
 
     def convert_format(self):
@@ -1073,13 +1073,13 @@ class EmbeddingGUI(QWidget):
                 except ValueError:
                     QMessageBox.warning(
                         self,
-                        "Conversion Error",
-                        f"Could not convert values for '{name}' to numbers. Skipping.",
+                        "转换错误",
+                        f"无法将 '{name}' 的值转换为数字。跳过。",
                     )
                     continue
             self.embedding_data = new_data
             self.current_file_type = "json"
-            QMessageBox.information(self, "Success", "Converted to Viso (JSON) Format")
+            QMessageBox.information(self, "成功", "已转换为 Viso (JSON) 格式")
         else:
             # MARKER: Rebuild as an OrderedDict
             new_data = OrderedDict()
@@ -1093,7 +1093,7 @@ class EmbeddingGUI(QWidget):
                     new_data[name] = []
             self.embedding_data = new_data
             self.current_file_type = "txt"
-            QMessageBox.information(self, "Success", "Converted to Rope (TXT) Format")
+            QMessageBox.information(self, "成功", "已转换为 Rope (TXT) 格式")
 
         self.populate_entries()
         self.update_button_visibility(True)
