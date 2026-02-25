@@ -1529,18 +1529,6 @@ class FindFaceDialog(QtWidgets.QDialog):
         self.search_edit = QtWidgets.QLineEdit(self)
         self.search_edit.setPlaceholderText("输入拼音、汉字或字符搜索...")
         self.search_edit.textChanged.connect(self.filter_folders)
-        self.search_edit.setMaximumWidth(250)
-        
-        # 创建全选按钮
-        self.select_all_button = QtWidgets.QPushButton("全选", self)
-        self.select_all_button.clicked.connect(self.select_all_folders)
-        
-        # 创建搜索和全选的水平布局
-        search_layout = QtWidgets.QHBoxLayout()
-        search_layout.addWidget(self.search_label)
-        search_layout.addWidget(self.search_edit)
-        search_layout.addWidget(self.select_all_button)
-        search_layout.addStretch()
         
         self.folder_list = QtWidgets.QListWidget(self)
         self.folder_list.itemDoubleClicked.connect(self.select_folder)
@@ -1552,7 +1540,8 @@ class FindFaceDialog(QtWidgets.QDialog):
         
         # 创建布局并添加控件
         layout = QtWidgets.QVBoxLayout()
-        layout.addLayout(search_layout)
+        layout.addWidget(self.search_label)
+        layout.addWidget(self.search_edit)
         layout.addWidget(QtWidgets.QLabel("人脸文件夹:"))
         layout.addWidget(self.folder_list)
         layout.addWidget(self.buttonBox)
