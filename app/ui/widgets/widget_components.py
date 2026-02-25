@@ -396,15 +396,15 @@ class TargetMediaCardButton(CardButton):
 
     def create_context_menu(self):
         self.popMenu = QtWidgets.QMenu(self)
-        remove_action = QtGui.QAction("Remove from list", self)
+        remove_action = QtGui.QAction("从列表中移除", self)
         remove_action.triggered.connect(self.remove_target_media_from_list)
         self.popMenu.addAction(remove_action)
 
-        delete_action = QtGui.QAction("Delete file to recycle bin", self)
+        delete_action = QtGui.QAction("删除文件到回收站", self)
         delete_action.triggered.connect(self.delete_target_media_to_trash)
         self.popMenu.addAction(delete_action)
 
-        open_path_action = QtGui.QAction("Open file location", self)
+        open_path_action = QtGui.QAction("打开文件位置", self)
         open_path_action.triggered.connect(self.open_target_path_by_explorer)
         self.popMenu.addAction(open_path_action)
 
@@ -759,12 +759,12 @@ class TargetFaceCardButton(CardButton):
     def create_context_menu(self):
         # create context menu
         self.popMenu = QtWidgets.QMenu(self)
-        parameters_copy_action = QtGui.QAction("Copy Parameters", self)
+        parameters_copy_action = QtGui.QAction("复制参数", self)
         parameters_copy_action.triggered.connect(self.copy_parameters)
-        parameters_paste_action = QtGui.QAction("Apply Copied Parameters", self)
+        parameters_paste_action = QtGui.QAction("应用复制的参数", self)
         parameters_paste_action.triggered.connect(self.paste_and_apply_parameters)
         save_parameters_action = QtGui.QAction(
-            "Save Current Parameters and Settings", self
+            "保存当前参数和设置", self
         )
         save_parameters_action.triggered.connect(
             partial(
@@ -773,7 +773,7 @@ class TargetFaceCardButton(CardButton):
                 self.face_id,
             )
         )
-        load_parameters_action = QtGui.QAction("Load Parameters", self)
+        load_parameters_action = QtGui.QAction("加载参数", self)
         load_parameters_action.triggered.connect(
             partial(
                 save_load_actions.load_parameters_and_settings,
@@ -782,7 +782,7 @@ class TargetFaceCardButton(CardButton):
             )
         )
         load_parameters_and_settings_action = QtGui.QAction(
-            "Load Parameters and Settings", self
+            "加载参数和设置", self
         )
         load_parameters_and_settings_action.triggered.connect(
             partial(
@@ -792,7 +792,7 @@ class TargetFaceCardButton(CardButton):
                 True,
             )
         )
-        remove_action = QtGui.QAction("Remove from List", self)
+        remove_action = QtGui.QAction("从列表中移除", self)
         remove_action.triggered.connect(self.remove_target_face_from_list)
         self.popMenu.addAction(parameters_copy_action)
         self.popMenu.addAction(parameters_paste_action)
@@ -1103,20 +1103,20 @@ class InputFaceCardButton(CardButton):
         # create context menu
         self.popMenu = QtWidgets.QMenu(self)
         create_embed_action = QtGui.QAction(
-            "Create embedding from selected faces", self
+            "从选中的面部创建嵌入", self
         )
         create_embed_action.triggered.connect(self.create_embedding_from_selected_faces)
         self.popMenu.addAction(create_embed_action)
 
-        remove_action = QtGui.QAction("Remove from list", self)
+        remove_action = QtGui.QAction("从列表中移除", self)
         remove_action.triggered.connect(self.remove_input_face_from_list)
         self.popMenu.addAction(remove_action)
 
-        delete_action = QtGui.QAction("Delete file to recycle bin", self)
+        delete_action = QtGui.QAction("删除文件到回收站", self)
         delete_action.triggered.connect(self.delete_input_face_to_trash)
         self.popMenu.addAction(delete_action)
 
-        open_path_action = QtGui.QAction("Open file location", self)
+        open_path_action = QtGui.QAction("打开文件位置", self)
         open_path_action.triggered.connect(self.open_target_path_by_explorer)
         self.popMenu.addAction(open_path_action)
 
