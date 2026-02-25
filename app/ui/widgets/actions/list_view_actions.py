@@ -454,29 +454,29 @@ def open_output_media_folder(main_window: "MainWindow"):
 def show_shortcuts(main_window: "MainWindow"):
     # HTML formating
     shortcuts_text = (
-        "<b><u>Actions:</u></b><br>"
-        "<b>F11</b> : View fullscreen<br>"
-        "<b>Space</b> : Play/Stop<br>"
-        "<b>R</b> : Record start/stop<br>"
-        "<b>S</b> : Swap face"
+        "<b><u>操作：</u></b><br>"
+        "<b>F11</b> : 全屏查看<br>"
+        "<b>空格</b> : 播放/停止<br>"
+        "<b>R</b> : 开始/停止录制<br>"
+        "<b>S</b> : 换脸"
         "<br>"
-        "<b><u>Seeking:</u></b><br>"
-        "<b>V</b> : Advance 1 frame<br>"
-        "<b>C</b> : Rewind 1 frame<br>"
-        "<b>D</b> : Advance 30 frames<br>"
-        "<b>A</b> : Rewind 30 frames<br>"
-        "<b>Z</b> : Seek to start<br>"
+        "<b><u>定位：</u></b><br>"
+        "<b>V</b> : 前进 1 帧<br>"
+        "<b>C</b> : 后退 1 帧<br>"
+        "<b>D</b> : 前进 30 帧<br>"
+        "<b>A</b> : 后退 30 帧<br>"
+        "<b>Z</b> : 跳转到开始<br>"
         "<br>"
-        "<b><u>Markers:</u></b><br>"
-        "<b>F</b> : Add video marker<br>"
-        "<b>ALT+F</b> : Remove video marker<br>"
-        "<b>W</b> : Move to next marker<br>"
-        "<b>Q</b> : Move to previous marker<br>"
+        "<b><u>标记：</u></b><br>"
+        "<b>F</b> : 添加视频标记<br>"
+        "<b>ALT+F</b> : 移除视频标记<br>"
+        "<b>W</b> : 移动到下一个标记<br>"
+        "<b>Q</b> : 移动到上一个标记<br>"
         "<br>"
     )
 
     main_window.display_messagebox_signal.emit(
-        "Shortcuts",
+        "快捷键",
         shortcuts_text,
         main_window,
     )
@@ -485,32 +485,32 @@ def show_shortcuts(main_window: "MainWindow"):
 def show_presets(main_window: "MainWindow"):
     # HTML formating
     presets_text = (
-        "<b><u>What are Presets?</u></b><br>"
-        "Presets are a functionality that allows saving and applying parameters on swapped faces.<br>"
-        "Saved options come from the: 'Face Swap', 'Face Editor', 'Restorers', 'Denoiser', and 'Settings' tabs."
+        "<b><u>什么是预设？</u></b><br>"
+        "预设是一项功能，允许保存和应用换脸参数。<br>"
+        "保存的选项来自：'换脸'、'面部编辑器'、'修复器'、'降噪器'和'设置'选项卡。"
         "<br><br>"
-        "<b><u>Option Categories</u></b><br>"
-        "There are two distinct categories:"
+        "<b><u>选项类别</u></b><br>"
+        "有两个不同的类别："
         "<br><br>"
-        "<b>1. Parameters (Applied <u>per face</u>)</b><br>"
-        "Includes all options from:<br>"
-        "&nbsp;&nbsp;&bull; 'Face Swap'<br>"
-        "&nbsp;&nbsp;&bull; 'Face Editor'<br>"
-        "&nbsp;&nbsp;&bull; 'Restorers'"
+        "<b>1. 参数（<u>按人脸应用</u>）</b><br>"
+        "包括以下所有选项：<br>"
+        "&nbsp;&nbsp;&bull; '换脸'<br>"
+        "&nbsp;&nbsp;&bull; '面部编辑器'<br>"
+        "&nbsp;&nbsp;&bull; '修复器'"
         "<br><br>"
-        "<b>2. Controls (Applied <u>globally</u>)</b><br>"
-        "Includes all options from:<br>"
-        "&nbsp;&nbsp;&bull; 'Denoiser'<br>"
-        "&nbsp;&nbsp;&bull; 'Settings'"
+        "<b>2. 控制项（<u>全局应用</u>）</b><br>"
+        "包括以下所有选项：<br>"
+        "&nbsp;&nbsp;&bull; '降噪器'<br>"
+        "&nbsp;&nbsp;&bull; '设置'"
         "<br><br>"
         # Une couleur (ex: #FFCC00 pour jaune/orange) aide à attirer l'œil
-        "<b><u><font color='#FFCC00'>IMPORTANT</font></u></b><br>"
-        "To apply the <b>Controls</b> options (Denoiser/Settings), the "
-        "<b>'Apply Settings'</b> button <u>must be checked</u> (it is OFF by default)."
+        "<b><u><font color='#FFCC00'>重要</font></u></b><br>"
+        "要应用<b>控制项</b>选项（降噪器/设置），"
+        "<b>'应用设置'</b>按钮<u>必须被选中</u>（默认为关闭）。"
     )
 
     main_window.display_messagebox_signal.emit(
-        "Presets",
+        "预设",
         presets_text,
         main_window,
     )

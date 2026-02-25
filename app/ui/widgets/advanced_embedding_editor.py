@@ -1195,25 +1195,25 @@ class EmbeddingGUI(QWidget):
 
     def show_help_dialog(self):
         shortcuts_text = """
-        <h3>Keyboard Shortcuts</h3>
-        <p><b>Ctrl + A</b>: Select all visible entries.</p>
-        <p><b>Ctrl + D</b>: Deselect all entries.</p>
-        <p><b>Ctrl + V</b>: Paste copied entries.</p>
-        <p><b>Delete</b>: Delete all selected entries.</p>
-        <p><b>Ctrl + Z</b>: Undo the last action.</p>
-        <p><b>Ctrl + Shift + Z</b>: Redo the last undone action.</p>
+        <h3>键盘快捷键</h3>
+        <p><b>Ctrl + A</b>: 选择所有可见条目。</p>
+        <p><b>Ctrl + D</b>: 取消选择所有条目。</p>
+        <p><b>Ctrl + V</b>: 粘贴复制的条目。</p>
+        <p><b>Delete</b>: 删除所有选定的条目。</p>
+        <p><b>Ctrl + Z</b>: 撤销上一个操作。</p>
+        <p><b>Ctrl + Shift + Z</b>: 重做上一个撤销的操作。</p>
 
-        <h3>Mouse Controls</h3>
-        <p><b>Click</b>: Select a single entry.</p>
-        <p><b>Ctrl + Click</b>: Add or remove an entry from the selection.</p>
-        <p><b>Shift + Click</b>: Select a range of entries.</p>
-        <p><b>Mouse Wheel</b>: Scroll horizontally.</p>
-        <p><b>Double-Click Name</b>: Rename an entry.</p>
-        <p><b>Drag & Drop File(s)</b>: Load files into the editor.</p>
-        <p><b>Drag & Drop Entry</b>: Reorder entries.</p>
-        <p><b>Right-Click</b>: Open context menu (Rename, Copy, Paste, Delete).</p>
+        <h3>鼠标控制</h3>
+        <p><b>单击</b>: 选择单个条目。</p>
+        <p><b>Ctrl + 单击</b>: 添加或从选择中移除条目。</p>
+        <p><b>Shift + 单击</b>: 选择一系列条目。</p>
+        <p><b>鼠标滚轮</b>: 水平滚动。</p>
+        <p><b>双击名称</b>: 重命名条目。</p>
+        <p><b>拖放文件</b>: 将文件加载到编辑器中。</p>
+        <p><b>拖放条目</b>: 重新排序条目。</p>
+        <p><b>右键单击</b>: 打开上下文菜单（重命名、复制、粘贴、删除）。</p>
         """
-        QMessageBox.information(self, "About Shortcuts", shortcuts_text)
+        QMessageBox.information(self, "关于快捷键", shortcuts_text)
 
 
 if __name__ == "__main__":
