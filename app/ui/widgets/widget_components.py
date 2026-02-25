@@ -1392,25 +1392,46 @@ class LoadLastWorkspaceDialog(QtWidgets.QDialog):
     ):
         super().__init__()
         self.main_window = main_window
-        self.setWindowTitle("Load Last Workspace")
+        self.setWindowTitle("加载上次工作区")
         self.setWindowIcon(QtGui.QIcon(":/media/media/visomaster_small.png"))
+
+        self.countdown_seconds = 5
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.update_countdown)
 
         # Create button box
         QBtn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
         self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
-        self.buttonBox.setCenterButtons(True)  # <-- ADD THIS LINE
+        self.buttonBox.setCenterButtons(True)
         self.buttonBox.accepted.connect(self.load_workspace)
         self.buttonBox.rejected.connect(self.reject)
 
         # Create layout and add widgets
         layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(QtWidgets.QLabel("您想要加载上次的工作空间吗？"))
+        self.message_label = QtWidgets.QLabel("您想要加载上次的工作空间吗？")
+        self.countdown_label = QtWidgets.QLabel(f"将在 {self.countdown_seconds} 秒后自动确认...")
+        self.countdown_label.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(self.message_label)
+        layout.addWidget(self.countdown_label)
         layout.addWidget(self.buttonBox)
 
         # Set dialog layout
         self.setLayout(layout)
 
+        # Start countdown
+        self.timer.start(1000)
+
+    def update_countdown(self):
+        self.countdown_seconds -= 1
+        if self.countdown_seconds > 0:
+            self.countdown_label.setText(f"将在 {self.countdown_seconds} 秒后自动确认...")
+        else:
+            self.timer.stop()
+            self.countdown_label.setText("正在自动确认...")
+            self.load_workspace()
+
     def load_workspace(self):
+        self.timer.stop()
         self.accept()
         save_load_actions.load_saved_workspace(self.main_window, "last_workspace.json")
 
