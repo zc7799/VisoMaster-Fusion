@@ -5,6 +5,16 @@ if TYPE_CHECKING:
     from app.ui.main_ui import MainWindow
 
 
+def format_time(frame_number, fps):
+    """Format frame number to time string (MM:SS)."""
+    if fps <= 0:
+        return "00:00"
+    total_seconds = frame_number / fps
+    minutes = int(total_seconds // 60)
+    seconds = int(total_seconds % 60)
+    return f"{minutes:02d}:{seconds:02d}"
+
+
 # @misc_helpers.benchmark  (Keep this decorator if you have it)
 def update_graphics_view(
     main_window: "MainWindow",
@@ -23,6 +33,14 @@ def update_graphics_view(
     current_text = main_window.videoSeekLineEdit.text()
     if current_text != str(current_frame_number):
         main_window.videoSeekLineEdit.setText(str(current_frame_number))
+
+    # Update the time label
+    fps = main_window.video_processor.fps
+    max_frame_number = main_window.video_processor.max_frame_number
+    current_time = format_time(current_frame_number, fps)
+    total_time = format_time(max_frame_number, fps)
+    time_text = f"{current_time} / {total_time}"
+    main_window.videoTimeLabel.setText(time_text)
 
     # Preserve the current transform (zoom and pan state) - No longer needed if we are not clearing scene every time
     # current_transform = main_window.graphicsViewFrame.transform()

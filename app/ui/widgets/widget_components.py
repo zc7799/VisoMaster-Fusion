@@ -270,6 +270,13 @@ class TargetMediaCardButton(CardButton):
 
         main_window.videoSeekSlider.blockSignals(False)  # Unblock signals
 
+        # Reset time label
+        fps = main_window.video_processor.fps
+        current_time = graphics_view_actions.format_time(0, fps)
+        total_time = graphics_view_actions.format_time(max_frames_number, fps)
+        time_text = f"{current_time} / {total_time}"
+        main_window.videoTimeLabel.setText(time_text)
+
         # Append the selected video button to the list
         main_window.selected_video_button = self
 
@@ -332,6 +339,9 @@ class TargetMediaCardButton(CardButton):
                 0
             )  # Set the slider to 0 for the new video
             main_window.videoSeekSlider.blockSignals(False)  # Unblock signals
+
+            # Reset time label
+            main_window.videoTimeLabel.setText("00:00 / 00:00")
             # Append the selected video button to the list
             main_window.selected_video_button = False
 

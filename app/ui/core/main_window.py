@@ -9,6 +9,7 @@
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
     QMetaObject, QObject, QPoint, QRect,
     QSize, QTime, QUrl, Qt)
+import PySide6.QtCore as QtCore
 from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
     QCursor, QFont, QFontDatabase, QGradient,
     QIcon, QImage, QKeySequence, QLinearGradient,
@@ -131,6 +132,16 @@ class Ui_MainWindow(object):
         self.videoSeekLineEdit.setMaximumSize(QSize(70, 16777215))
         self.videoSeekLineEdit.setClearButtonEnabled(False)
         self.horizontalLayoutMediaSlider.addWidget(self.videoSeekLineEdit)
+        self.videoTimeLabel = QLabel(self.mediaLayout)
+        self.videoTimeLabel.setObjectName(u"videoTimeLabel")
+        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        sizePolicy2.setHorizontalStretch(0)
+        sizePolicy2.setVerticalStretch(0)
+        sizePolicy2.setHeightForWidth(self.videoTimeLabel.sizePolicy().hasHeightForWidth())
+        self.videoTimeLabel.setSizePolicy(sizePolicy2)
+        self.videoTimeLabel.setMinimumSize(QSize(120, 16777215))
+        self.videoTimeLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.horizontalLayoutMediaSlider.addWidget(self.videoTimeLabel)
         self.verticalLayoutMediaControls.addLayout(self.horizontalLayoutMediaSlider)
         self.horizontalLayoutMediaButtons = QHBoxLayout()
         self.horizontalLayoutMediaButtons.setObjectName(u"horizontalLayoutMediaButtons")
@@ -733,6 +744,7 @@ class Ui_MainWindow(object):
 #if QT_CONFIG(tooltip)
         self.videoSeekLineEdit.setToolTip(QCoreApplication.translate("MainWindow", u"\u5e27\u53f7", None))
 #endif // QT_CONFIG(tooltip)
+        self.videoTimeLabel.setText(QCoreApplication.translate("MainWindow", u"00:00 / 00:00", None))
 #if QT_CONFIG(tooltip)
         self.liveSoundButton.setToolTip(QCoreApplication.translate("MainWindow", u"[\u5b9e\u9a8c\u6027\u529f\u80fd] \u5728\u89c6\u9891\u64ad\u653e\u65f6\u5207\u6362\u5b9e\u65f6\u58f0\u97f3", None))
 #endif // QT_CONFIG(tooltip)

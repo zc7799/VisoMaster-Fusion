@@ -736,6 +736,13 @@ def record_video(main_window: "MainWindow", checked: bool):
                 main_window.videoSeekSlider.blockSignals(True)
                 main_window.videoSeekSlider.setValue(0)
                 main_window.videoSeekSlider.blockSignals(False)
+                # Reset time label for batch processing
+                fps = video_processor.fps
+                max_frame_number = video_processor.max_frame_number
+                current_time = graphics_view_actions.format_time(0, fps)
+                total_time = graphics_view_actions.format_time(max_frame_number, fps)
+                time_text = f"{current_time} / {total_time}"
+                main_window.videoTimeLabel.setText(time_text)
                 print(
                     "[INFO] Batch processing: Forcing video record to start from frame 0."
                 )
@@ -1525,6 +1532,8 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
                 main_window.videoSeekSlider.setValue(0)
                 main_window.videoSeekSlider.blockSignals(False)
                 main_window.video_processor.max_frame_number = 0
+                # Reset time label for image
+                main_window.videoTimeLabel.setText("00:00 / 00:00")
                 main_window.video_processor.process_current_frame(synchronous=True)
         else:
             # If no media was loaded, clear the scene
@@ -1537,6 +1546,8 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
             main_window.videoSeekSlider.setValue(0)
             main_window.videoSeekSlider.blockSignals(False)
             main_window.video_processor.max_frame_number = 0
+            # Reset time label
+            main_window.videoTimeLabel.setText("00:00 / 00:00")
 
 
 def toggle_live_sound(main_window: "MainWindow", toggle_value: bool):
