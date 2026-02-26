@@ -35,8 +35,8 @@ COMMON_LAYOUT_DATA: Any = {
         "FaceRestorerDetTypeSelection": {
             "level": 2,
             "label": "对齐方式",
-            "options": ["原始", "混合", "参考"],
-            "default": "原始",
+            "options": ["Original", "Blend", "Reference"],
+            "default": "Original",
             "parentToggle": "FaceRestorerEnableToggle",
             "requiredToggleValue": True,
             "help": "选择将面部恢复到原始或混合位置的对齐方法。",
@@ -145,8 +145,8 @@ COMMON_LAYOUT_DATA: Any = {
         "FaceRestorerDetType2Selection": {
             "level": 2,
             "label": "对齐方式",
-            "options": ["原始", "混合", "参考"],
-            "default": "原始",
+            "options": ["Original", "Blend", "Reference"],
+            "default": "Original",
             "parentToggle": "FaceRestorerEnable2Toggle",
             "requiredToggleValue": True,
             "help": "选择将面部恢复到原始或混合位置的对齐方法。",
@@ -218,8 +218,8 @@ COMMON_LAYOUT_DATA: Any = {
         "FaceExpressionBeforeTypeSelection": {
             "level": 1,
             "label": "Pipeline 位置",
-            "options": ["开始", "第一个修复器之后", "第二个修复器之后"],
-            "default": "开始",
+            "options": ["Beginning", "After First Restorer", "After Second Restorer"],
+            "default": "Beginning",
             "help": "选择面部表情修复编辑器在 pipeline 中的位置。",
         },
         "FaceExpressionEnableBothToggle": {
@@ -293,8 +293,8 @@ COMMON_LAYOUT_DATA: Any = {
         "FaceExpressionAnimationRegionSelection": {
             "level": 3,
             "label": "动画区域",
-            "options": ["全部", "眼睛", "嘴唇"],
-            "default": "全部",
+            "options": ["all", "eyes", "lips"],
+            "default": "all",
             "parentToggle": "FaceExpressionEnableBothToggle",
             "requiredToggleValue": True,
             "parentSelection": "FaceExpressionModeSelection",
