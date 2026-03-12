@@ -886,10 +886,10 @@ def record_video(main_window: "MainWindow", checked: bool):
             try:
                 box = QtWidgets.QMessageBox(main_window)
                 box.setIcon(QtWidgets.QMessageBox.Warning)
-                box.setWindowTitle("Confirm stop")
-                box.setText("Stop multi-segment recording?")
+                box.setWindowTitle("确认停止")
+                box.setText("停止多段录制？")
                 box.setInformativeText(
-                    "Segment recording will stop immediately. Output may be incomplete."
+                    "录制将立即停止，输出可能不完整。"
                 )
                 box.setStandardButtons(
                     QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
@@ -1427,7 +1427,7 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
         main_window,
     )
     progress_dialog.setWindowModality(QtCore.Qt.WindowModal)
-    progress_dialog.setWindowTitle("Batch Processing Media")
+    progress_dialog.setWindowTitle("批量处理媒体")
     progress_dialog.setValue(0)
     progress_dialog.show()
 
@@ -1440,7 +1440,7 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
         for i, (media_path, file_type) in enumerate(media_files_to_process):
             # Update progress and check for cancellation
             progress_dialog.setValue(i)
-            progress_dialog.setLabelText(f"Processing: {os.path.basename(media_path)}")
+            progress_dialog.setLabelText(f"正在处理：{os.path.basename(media_path)}")
             QtWidgets.QApplication.processEvents()  # Keep UI responsive
 
             if progress_dialog.confirmedCanceled():
