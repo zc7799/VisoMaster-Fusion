@@ -15,6 +15,13 @@ from app.helpers.typing_helper import ControlTypes
 if TYPE_CHECKING:
     from app.ui.main_ui import MainWindow
 
+# PERF-01: Module-level constant built once from layout data, reused in set_control_widgets_values
+_ALL_CONTROL_WIDGET_OPTIONS: dict = {}
+for _layout_source in [SETTINGS_LAYOUT_DATA, COMMON_LAYOUT_DATA]:
+    for _group_data in _layout_source.values():
+        for _widget_key, _widget_data in _group_data.items():
+            _ALL_CONTROL_WIDGET_OPTIONS[_widget_key] = _widget_data
+
 
 @QtCore.Slot(str, str, QtWidgets.QWidget)
 def create_and_show_messagebox(
@@ -80,13 +87,11 @@ def update_control(
             exec_function(*exec_function_args)
     main_window.control[control_name] = control_value
     # Also update the feeder's state if it's running
-    if (
-        main_window.video_processor.processing
-        and main_window.video_processor.feeder_control
-    ):
+    # BUG-16 / THREAD-03: feeder_control None check moved inside the lock to prevent TOCTOU race
+    if main_window.video_processor.processing:
         with main_window.video_processor.state_lock:
             # Cast to ControlTypes to satisfy the type checker, as feeder_control is typed
-            if control_name in cast(
+            if main_window.video_processor.feeder_control and control_name in cast(
                 ControlTypes, main_window.video_processor.feeder_control
             ):
                 cast(ControlTypes, main_window.video_processor.feeder_control)[
@@ -154,12 +159,13 @@ def update_parameter(
     if main_window.target_faces and face_id:
         main_window.parameters[face_id][parameter_name] = parameter_value
         # Also update the feeder's state if it's running
-        if (
-            main_window.video_processor.processing
-            and main_window.video_processor.feeder_parameters
-        ):
+        # BUG-16 / THREAD-03: feeder_parameters None check moved inside the lock to prevent TOCTOU race
+        if main_window.video_processor.processing:
             with main_window.video_processor.state_lock:
-                if face_id in main_window.video_processor.feeder_parameters:
+                if (
+                    main_window.video_processor.feeder_parameters
+                    and face_id in main_window.video_processor.feeder_parameters
+                ):
                     main_window.video_processor.feeder_parameters[face_id][
                         parameter_name
                     ] = parameter_value
@@ -182,10 +188,13 @@ def update_parameter(
         exec_function(*final_exec_args)
 
 
-def refresh_frame(main_window: "MainWindow"):
+def refresh_frame(main_window: "MainWindow", synchronous: bool = False):
+    # PERF-05: Skip frame refresh if a batch update is in progress
+    if getattr(main_window, "_batch_update_in_progress", False):
+        return
     video_processor = main_window.video_processor
     if not video_processor.processing:
-        video_processor.process_current_frame()
+        video_processor.process_current_frame(synchronous=synchronous)
 
 
 # Function to Hide Elements conditionally from values in LayoutData (Currently supports using Selection box and Toggle button to hide other widgets)
@@ -247,15 +256,39 @@ def show_hide_related_widgets(
                     # Final Decision
                     if selection_condition_met and toggle_condition_met:
                         current_widget.show()
-                        current_widget.label_widget.show()
-                        current_widget.reset_default_button.show()
-                        if current_widget.line_edit:
+                        # QUAL-15: Guard attribute access with hasattr/None checks (CASE 1 show path)
+                        if (
+                            hasattr(current_widget, "label_widget")
+                            and current_widget.label_widget
+                        ):
+                            current_widget.label_widget.show()
+                        if (
+                            hasattr(current_widget, "reset_default_button")
+                            and current_widget.reset_default_button
+                        ):
+                            current_widget.reset_default_button.show()
+                        if (
+                            hasattr(current_widget, "line_edit")
+                            and current_widget.line_edit
+                        ):
                             current_widget.line_edit.show()
                     else:
                         current_widget.hide()
-                        current_widget.label_widget.hide()
-                        current_widget.reset_default_button.hide()
-                        if current_widget.line_edit:
+                        # QUAL-15: Guard attribute access with hasattr/None checks (CASE 1 hide path)
+                        if (
+                            hasattr(current_widget, "label_widget")
+                            and current_widget.label_widget
+                        ):
+                            current_widget.label_widget.hide()
+                        if (
+                            hasattr(current_widget, "reset_default_button")
+                            and current_widget.reset_default_button
+                        ):
+                            current_widget.reset_default_button.hide()
+                        if (
+                            hasattr(current_widget, "line_edit")
+                            and current_widget.line_edit
+                        ):
                             current_widget.line_edit.hide()
 
         # --- CASE 2: PARENT IS A TOGGLE BUTTON ---
@@ -284,6 +317,7 @@ def show_hide_related_widgets(
                     # 2. Check Toggle Condition
                     toggle_condition_met = False
 
+                    # DEPRECATED: comma-separated toggle syntax; evaluates only the last toggle. Use '&' or '|' instead.
                     if "," in parentToggles:
                         # Legacy comma logic (iterative check)
                         result = [item.strip() for item in parentToggles.split(",")]
@@ -338,15 +372,39 @@ def show_hide_related_widgets(
                     # Final Decision
                     if selection_condition_met and toggle_condition_met:
                         current_widget.show()
-                        current_widget.label_widget.show()
-                        current_widget.reset_default_button.show()
-                        if current_widget.line_edit:
+                        # QUAL-15: Guard attribute access with hasattr/None checks (CASE 2 show path)
+                        if (
+                            hasattr(current_widget, "label_widget")
+                            and current_widget.label_widget
+                        ):
+                            current_widget.label_widget.show()
+                        if (
+                            hasattr(current_widget, "reset_default_button")
+                            and current_widget.reset_default_button
+                        ):
+                            current_widget.reset_default_button.show()
+                        if (
+                            hasattr(current_widget, "line_edit")
+                            and current_widget.line_edit
+                        ):
                             current_widget.line_edit.show()
                     else:
                         current_widget.hide()
-                        current_widget.label_widget.hide()
-                        current_widget.reset_default_button.hide()
-                        if current_widget.line_edit:
+                        # QUAL-15: Guard attribute access with hasattr/None checks (CASE 2 hide path)
+                        if (
+                            hasattr(current_widget, "label_widget")
+                            and current_widget.label_widget
+                        ):
+                            current_widget.label_widget.hide()
+                        if (
+                            hasattr(current_widget, "reset_default_button")
+                            and current_widget.reset_default_button
+                        ):
+                            current_widget.reset_default_button.hide()
+                        if (
+                            hasattr(current_widget, "line_edit")
+                            and current_widget.line_edit
+                        ):
                             current_widget.line_edit.hide()
 
             parent_widget.start_animation()
@@ -355,7 +413,8 @@ def show_hide_related_widgets(
 # @misc_helpers.benchmark
 def get_pixmap_from_frame(main_window: "MainWindow", frame: np.ndarray):
     height, width, channel = frame.shape
-    if channel == 2:
+    # BUG-04: Grayscale check should be channel==1, not 2
+    if channel == 1:
         # Frame in grayscale
         bytes_per_line = width
         q_img = QtGui.QImage(
@@ -375,11 +434,8 @@ def get_pixmap_from_frame(main_window: "MainWindow", frame: np.ndarray):
     return pixmap
 
 
+# QUAL-02: Inlined _update_gpu_memory_progressbar body directly; removed the redundant wrapper function
 def update_gpu_memory_progressbar(main_window: "MainWindow"):
-    _update_gpu_memory_progressbar(main_window)
-
-
-def _update_gpu_memory_progressbar(main_window: "MainWindow"):
     memory_used, memory_total = main_window.models_processor.get_gpu_memory()
     main_window.gpu_memory_update_signal.emit(memory_used, memory_total)
 
@@ -424,10 +480,15 @@ def set_gpu_memory_progressbar_value(
         }
     """
 
-    if (memory_used / memory_total) > 0.85:
-        main_window.vramProgressBar.setStyleSheet(base_style + chunk_style_high)
-    else:
-        main_window.vramProgressBar.setStyleSheet(base_style + chunk_style_normal)
+    # BUG-05: Guard against division by zero; PERF-03: Only call setStyleSheet when threshold crosses
+    is_high = memory_total > 0 and (memory_used / memory_total) > 0.85
+    was_high = getattr(main_window, "_vram_high_style_active", None)
+    if is_high != was_high:
+        main_window._vram_high_style_active = is_high
+        if is_high:
+            main_window.vramProgressBar.setStyleSheet(base_style + chunk_style_high)
+        else:
+            main_window.vramProgressBar.setStyleSheet(base_style + chunk_style_normal)
 
     main_window.vramProgressBar.update()
 
@@ -510,10 +571,45 @@ def extract_frame_as_pixmap(
     return None  # Return None if everything failed.
 
 
+# QUAL-05: Helper to set a single widget's value based on its type, extracted from duplicate code
+def _set_single_widget_value(widget, value):
+    if isinstance(
+        widget,
+        (
+            widget_components.ParameterLineEdit,
+            widget_components.ParameterSlider,
+        ),
+    ):
+        try:
+            int_value = int(float(value))
+            widget.set_value(int_value)
+        except (ValueError, TypeError):
+            pass
+    elif isinstance(
+        widget,
+        (
+            widget_components.ParameterLineDecimalEdit,
+            widget_components.ParameterDecimalSlider,
+        ),
+    ):
+        try:
+            float_value = float(value)
+            widget.set_value(float_value)
+        except (ValueError, TypeError):
+            pass
+    elif isinstance(widget, widget_components.ToggleButton):
+        widget.set_value(bool(value))
+    elif isinstance(widget, widget_components.SelectionBox):
+        widget.set_value(str(value))
+    else:
+        widget.set_value(value)
+
+
+# QUAL-06: Changed face_id default from False to None; changed (face_id is False) to (not face_id)
 def set_widgets_values_using_face_id_parameters(
-    main_window: "MainWindow", face_id=False
+    main_window: "MainWindow", face_id=None
 ):
-    if (face_id is False) or (not main_window.parameters.get(face_id)):
+    if not face_id or (not main_window.parameters.get(face_id)):
         # print("Set widgets values using default parameters")
         if main_window.current_widget_parameters:
             parameters = main_window.current_widget_parameters.copy()
@@ -523,42 +619,24 @@ def set_widgets_values_using_face_id_parameters(
         # print(f"Set widgets values using face_id {face_id}")
         parameters = main_window.parameters[face_id].copy()
     parameter_widgets = main_window.parameter_widgets
-    for parameter_name, parameter_value in parameters.items():
-        widget = parameter_widgets.get(parameter_name)
-        if widget:
-            # temporarily disable refreshing the frame to prevent slowing due to unnecessary processing
-            widget.enable_refresh_frame = False
-            if isinstance(
-                widget,
-                (
-                    widget_components.ParameterLineEdit,
-                    widget_components.ParameterSlider,
-                ),
-            ):
-                try:
-                    int_value = int(float(parameter_value))
-                    widget.set_value(int_value)
-                except (ValueError, TypeError):
-                    pass
-            elif isinstance(
-                widget,
-                (
-                    widget_components.ParameterLineDecimalEdit,
-                    widget_components.ParameterDecimalSlider,
-                ),
-            ):
-                try:
-                    float_value = float(parameter_value)
-                    widget.set_value(float_value)
-                except (ValueError, TypeError):
-                    pass
-            elif isinstance(widget, widget_components.ToggleButton):
-                widget.set_value(bool(parameter_value))
-            elif isinstance(widget, widget_components.SelectionBox):
-                widget.set_value(str(parameter_value))
-            else:
-                widget.set_value(parameter_value)
-            widget.enable_refresh_frame = True
+    # Preserve outer suppression state so nested batch operations do not override it.
+    previous_batch_flag = getattr(main_window, "_batch_update_in_progress", False)
+    # PERF-05: Set batch update flag to suppress per-widget refresh_frame calls during the loop
+    main_window._batch_update_in_progress = True
+    try:
+        for parameter_name, parameter_value in parameters.items():
+            widget = parameter_widgets.get(parameter_name)
+            if widget:
+                # temporarily disable refreshing the frame to prevent slowing due to unnecessary processing
+                widget.enable_refresh_frame = False
+                # QUAL-05: Delegate to shared helper instead of inline isinstance chain
+                _set_single_widget_value(widget, parameter_value)
+                widget.enable_refresh_frame = True
+    finally:
+        main_window._batch_update_in_progress = previous_batch_flag
+        # Trigger a single refresh only if this function owns the outermost batch scope.
+        if not previous_batch_flag:
+            refresh_frame(main_window)
 
 
 def set_control_widgets_values(main_window: "MainWindow", enable_exec_func=True):
@@ -571,15 +649,8 @@ def set_control_widgets_values(main_window: "MainWindow", enable_exec_func=True)
     control = main_window.control.copy()
     parameter_widgets = main_window.parameter_widgets
 
-    # Prepare a dictionary of ALL widget options from layout data
-    all_widget_options = {}
-    for layout_data_source in [
-        SETTINGS_LAYOUT_DATA,
-        COMMON_LAYOUT_DATA,
-    ]:  # Iterate over both
-        for group_name, group_data in layout_data_source.items():
-            for widget_key, widget_data in group_data.items():
-                all_widget_options[widget_key] = widget_data
+    # PERF-01: Use the module-level pre-built constant instead of rebuilding the dict on every call
+    all_widget_options = _ALL_CONTROL_WIDGET_OPTIONS
 
     # Iterate through control items and update widgets
     for control_name, control_value in control.items():
@@ -589,37 +660,8 @@ def set_control_widgets_values(main_window: "MainWindow", enable_exec_func=True)
             # Temporarily disable frame refresh
             widget.enable_refresh_frame = False
 
-            # Set the widget value
-            if isinstance(
-                widget,
-                (
-                    widget_components.ParameterLineEdit,
-                    widget_components.ParameterSlider,
-                ),
-            ):
-                try:
-                    int_value = int(float(control_value))
-                    widget.set_value(int_value)
-                except (ValueError, TypeError):
-                    pass
-            elif isinstance(
-                widget,
-                (
-                    widget_components.ParameterLineDecimalEdit,
-                    widget_components.ParameterDecimalSlider,
-                ),
-            ):
-                try:
-                    float_value = float(control_value)
-                    widget.set_value(float_value)
-                except (ValueError, TypeError):
-                    pass
-            elif isinstance(widget, widget_components.ToggleButton):
-                widget.set_value(bool(control_value))
-            elif isinstance(widget, widget_components.SelectionBox):
-                widget.set_value(str(control_value))
-            else:
-                widget.set_value(control_value)
+            # QUAL-05: Delegate to shared helper instead of inline isinstance chain
+            _set_single_widget_value(widget, control_value)
 
             if enable_exec_func:
                 # Execute any associated function, if defined

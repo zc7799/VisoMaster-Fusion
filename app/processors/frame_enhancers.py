@@ -37,9 +37,9 @@ class FrameEnhancers:
             "UltraSharp-x4": "UltraSharpx4",
             "UltraMix-x4": "UltraMixx4",
             "RealEsr-General-x4v3": "RealEsrx4v3",
-            "Deoldify-Artistic": "DeoldifyArt",
-            "Deoldify-Stable": "DeoldifyStable",
-            "Deoldify-Video": "DeoldifyVideo",
+            "DeOldify-Artistic": "DeoldifyArt",
+            "DeOldify-Stable": "DeoldifyStable",
+            "DeOldify-Video": "DeoldifyVideo",
             "DDColor-Artistic": "DDColorArt",
             "DDColor": "DDcolor",
         }
@@ -167,6 +167,14 @@ class FrameEnhancers:
             return img
 
         # --- 3. Process Tiles ---
+        # Pre-allocate a single reusable output tile (all tiles have the same size
+        # because the image was padded to an exact multiple of tile_size above).
+        output_tile = torch.empty(
+            (b, c, tile_size * scale, tile_size * scale),
+            dtype=torch.float32,
+            device=self.models_processor.device,
+        ).contiguous()
+
         with torch.no_grad():  # Disable gradient calculation for inference
             # Process tiles
             for j in range(tiles_y):
@@ -177,19 +185,7 @@ class FrameEnhancers:
                     # Extract the input tile
                     input_tile = img[:, :, y_start:y_end, x_start:x_end].contiguous()
 
-                    # Create an empty output tile with scaled dimensions
-                    output_tile = torch.empty(
-                        (
-                            input_tile.shape[0],
-                            input_tile.shape[1],
-                            input_tile.shape[2] * scale,
-                            input_tile.shape[3] * scale,
-                        ),
-                        dtype=torch.float32,
-                        device=self.models_processor.device,
-                    ).contiguous()
-
-                    # Run the selected upscaler function on the tile
+                    # Run the selected upscaler function into the pre-allocated tile
                     fn_upscaler(input_tile, output_tile)
 
                     # --- 4. Reassemble Output ---
@@ -217,16 +213,22 @@ class FrameEnhancers:
         Private helper to run any specified enhancer model.
 
         This function centralizes the logic for:
-        1. Lazy-loading the model.
-        2. Handling model loading errors with a robust fallback.
-        3. Setting up IOBinding for inputs and outputs.
-        4. Calling the synchronized execution function.
+        1. Translating user-facing model names to internal keys via model_map.
+        2. Lazy-loading the model.
+        3. Handling model loading errors with a robust fallback.
+        4. Setting up IOBinding for inputs and outputs.
+        5. Calling the synchronized execution function.
 
         Args:
-            model_name (str): The internal key for the model (e.g., "RealEsrganx2Plus").
+            model_name (str): Either a user-facing name (e.g., "RealEsrgan-x4-Plus") or
+                              an internal key (e.g., "RealEsrganx4Plus"). model_map is
+                              consulted first; if no mapping is found the name is used as-is.
             image (torch.Tensor): The input image (or tile) tensor.
             output (torch.Tensor): The pre-allocated output tensor to be filled.
         """
+        # Translate user-facing name to internal model key if applicable
+        model_name = self.model_map.get(model_name, model_name)
+
         # Lazy-load the model if it's not already in memory
         if not self.models_processor.models[model_name]:
             self.models_processor.models[model_name] = self.models_processor.load_model(
@@ -427,7 +429,7 @@ class FrameEnhancers:
                     scale = 4
 
                 image = img.type(torch.float32)
-                if torch.max(image) > 256:  # 16-bit image
+                if torch.max(image) > 255:  # 16-bit image
                     max_range = 65535
                 else:
                     max_range = 255
@@ -492,16 +494,20 @@ class FrameEnhancers:
                 )
                 output = t_resize_o(output)
 
-                output = faceutil.rgb_to_yuv(output, True)
+                output_normalized = output / 255.0 if output.max() > 1.0 else output
+                output_normalized = faceutil.rgb_to_yuv(output_normalized, True)
                 # do a black and white transform first to get better luminance values
-                hires = faceutil.rgb_to_yuv(img, True)
+                img_normalized = img / 255.0 if img.max() > 1.0 else img
+                hires = faceutil.rgb_to_yuv(img_normalized, True)
 
-                hires[1:3, :, :] = output[1:3, :, :]
+                hires[1:3, :, :] = output_normalized[1:3, :, :]
                 hires = faceutil.yuv_to_rgb(hires, True)
 
                 # Blend
                 alpha = float(control["FrameEnhancerBlendSlider"]) / 100.0
-                img = torch.add(torch.mul(hires, alpha), torch.mul(img, 1 - alpha))
+                img = torch.add(
+                    torch.mul(hires, alpha), torch.mul(img_normalized, 1 - alpha)
+                )
 
                 img = img.type(torch.uint8)
 
@@ -515,7 +521,8 @@ class FrameEnhancers:
                 # orig_l = torch.from_numpy(orig_l).to(self.models_processor.device)
                 # orig_l = orig_l.permute(2, 0, 1)
                 #'''
-                orig_l = faceutil.rgb_to_lab(img, True)
+                img_normalized = img / 255.0 if img.max() > 1.0 else img
+                orig_l = faceutil.rgb_to_lab(img_normalized, True)
 
                 orig_l = orig_l[0:1, :, :]  # (1, h, w)
 
@@ -534,7 +541,8 @@ class FrameEnhancers:
                 # img_l = torch.from_numpy(img_l).to(self.models_processor.device)
                 # img_l = img_l.permute(2, 0, 1)
                 #'''
-                img_l = faceutil.rgb_to_lab(image, True)
+                image_normalized = image / 255.0 if image.max() > 1.0 else image
+                img_l = faceutil.rgb_to_lab(image_normalized, True)
 
                 img_l = img_l[0:1, :, :]  # (1, render_factor, render_factor)
                 img_gray_lab = torch.cat(

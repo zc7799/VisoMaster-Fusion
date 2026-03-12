@@ -5,6 +5,7 @@ from app.processors.utils import faceutil
 import numpy as np
 from numpy.linalg import norm as l2norm
 from typing import TYPE_CHECKING
+import kornia.geometry.transform as kgm
 
 if TYPE_CHECKING:
     from app.processors.models_processor import ModelsProcessor
@@ -15,6 +16,7 @@ class FaceSwappers:
         self.models_processor = models_processor
         self.current_swapper_model = None
         self.current_arcface_model = None
+        self._session_io_name_cache: dict = {}  # FS-PERF-02: cache input/output names keyed by session id
         self.resize_112 = v2.Resize(
             (112, 112), interpolation=v2.InterpolationMode.BILINEAR, antialias=False
         )
@@ -45,9 +47,14 @@ class FaceSwappers:
                 self.models_processor.unload_model(model_name)
 
     def _manage_model(self, new_model_name):
-        if self.current_swapper_model and self.current_swapper_model != new_model_name:
-            self.models_processor.unload_model(self.current_swapper_model)
-        self.current_swapper_model = new_model_name
+        # FS-RACE-01: protect read-modify-write of current_swapper_model with lock
+        with self.models_processor.model_lock:
+            if (
+                self.current_swapper_model
+                and self.current_swapper_model != new_model_name
+            ):
+                self.models_processor.unload_model(self.current_swapper_model)
+            # FS-BUG-07: current_swapper_model is committed only after load confirmation (see _load_swapper_model)
 
     def _load_swapper_model(self, model_name):
         """Handles loading and swapping of swapper models."""
@@ -55,6 +62,10 @@ class FaceSwappers:
         model = self.models_processor.models.get(model_name)
         if not model:
             model = self.models_processor.load_model(model_name)
+        # FS-BUG-07: only commit state after load is confirmed non-None
+        if model is not None:
+            with self.models_processor.model_lock:
+                self.current_swapper_model = model_name
         return model
 
     def _run_model_with_lazy_build_check(
@@ -94,9 +105,14 @@ class FaceSwappers:
     def run_recognize_direct(
         self, img, kps, similarity_type="Opal", arcface_model="Inswapper128ArcFace"
     ):
-        if self.current_arcface_model and self.current_arcface_model != arcface_model:
-            self.models_processor.unload_model(self.current_arcface_model)
-        self.current_arcface_model = arcface_model
+        # FS-RACE-01: protect read-modify-write of current_arcface_model with lock
+        with self.models_processor.model_lock:
+            if (
+                self.current_arcface_model
+                and self.current_arcface_model != arcface_model
+            ):
+                self.models_processor.unload_model(self.current_arcface_model)
+            self.current_arcface_model = arcface_model
 
         ort_session = self.models_processor.models.get(arcface_model)
         if not ort_session:
@@ -143,9 +159,6 @@ class FaceSwappers:
 
         # --- ALIGNMENT STRATEGIES ---
         if similarity_type == "Optimal":
-            # Mode 1: Optimal (Multi-Template)
-            # Leverages faceutil to check against 5 different templates (Front, Left, Right, Profiles).
-            # This provides the best alignment for faces at steep angles (profiles), improving embedding accuracy.
             img, _ = faceutil.warp_face_by_face_landmark_5(
                 img,
                 face_kps,
@@ -154,80 +167,82 @@ class FaceSwappers:
             )
 
         elif similarity_type == "Pearl":
-            # Mode 2: Pearl (Wide Context)
-            # Uses a shifted center and wider crop (128x128) then resizes to 112x112.
-            # This captures more of the forehead and chin, useful when the detector is too tight.
             dst = self.models_processor.arcface_dst.copy()
-            dst[:, 0] += 8.0  # Shift X center to accommodate wider crop
-
-            # Use from_estimate to find the transform matrix
+            dst[:, 0] += 8.0
             tform = trans.SimilarityTransform.from_estimate(face_kps, dst)
 
-            # Apply affine transform to get 128x128 crop
-            img = v2.functional.affine(
-                img,
-                tform.rotation * 57.2958,
-                (tform.translation[0], tform.translation[1]),
-                tform.scale,
-                0,
-                center=(0, 0),
+            # OPTIMIZED: Direct GPU Warp to 128x128 using Kornia
+            M_tensor = (
+                torch.from_numpy(tform.params[0:2]).float().unsqueeze(0).to(img.device)
             )
-            # Crop at 128 then resize to standard 112
-            img = v2.functional.crop(img, 0, 0, 128, 128)
-            img = self.resize_112(img)
+            img_b = img.unsqueeze(0) if img.dim() == 3 else img
+            img = kgm.warp_affine(
+                img_b.float(),
+                M_tensor,
+                dsize=(128, 128),
+                mode="bilinear",
+                align_corners=True,
+            ).squeeze(0)
+
+            # Fast resize to standard 112
+            img = v2.functional.resize(img, [112, 112], antialias=True)
 
         else:
             # Mode 3: Opal (Standard / Default)
-            # Standard ArcFace frontal alignment.
-            # Efficient and accurate for most frontal/semi-frontal faces.
             tform = trans.SimilarityTransform.from_estimate(
                 face_kps, self.models_processor.arcface_dst
             )
 
-            # Transform and crop directly to 112x112
-            img = v2.functional.affine(
-                img,
-                tform.rotation * 57.2958,
-                (tform.translation[0], tform.translation[1]),
-                tform.scale,
-                0,
-                center=(0, 0),
+            # OPTIMIZED: Direct GPU Warp to 112x112 using Kornia (bypasses torchvision crop/affine)
+            M_tensor = (
+                torch.from_numpy(tform.params[0:2]).float().unsqueeze(0).to(img.device)
             )
-            img = v2.functional.crop(img, 0, 0, 112, 112)
+            img_b = img.unsqueeze(0) if img.dim() == 3 else img
+            img = kgm.warp_affine(
+                img_b.float(),
+                M_tensor,
+                dsize=(112, 112),
+                mode="bilinear",
+                align_corners=True,
+            ).squeeze(0)
 
         # --- NORMALIZATION & PRE-PROCESSING ---
+        cropped_image = img.permute(1, 2, 0).clone()  # Store for display/debug (H,W,3)
+
+        # Ensure float format
+        if img.dtype == torch.uint8:
+            img = img.float()
+
+        # OPTIMIZED: In-Place math operations (.sub_ and .div_) to save VRAM fragmentation
         if arcface_model == "Inswapper128ArcFace":
-            cropped_image = img.permute(1, 2, 0).clone()
-            if img.dtype == torch.uint8:
-                img = img.to(torch.float32)
-            img = torch.sub(img, 127.5)
-            img = torch.div(img, 127.5)
+            # FS-BUG-03: ensure input is in [0, 255] before normalizing
+            if img.max() <= 1.0:
+                img = img * 255.0
+            img.sub_(127.5).div_(127.5)
 
         elif arcface_model == "SimSwapArcFace":
-            cropped_image = img.permute(1, 2, 0).clone()
-            if img.dtype == torch.uint8:
-                img = torch.div(img.to(torch.float32), 255.0)
-            img = v2.functional.normalize(
-                img, (0.485, 0.456, 0.406), (0.229, 0.224, 0.225), inplace=False
+            img.div_(255.0)
+            v2.functional.normalize(
+                img, (0.485, 0.456, 0.406), (0.229, 0.224, 0.225), inplace=True
             )
 
         else:
             # GhostArcFace, CSCSArcFace, etc.
-            cropped_image = img.permute(
-                1, 2, 0
-            ).clone()  # Store for display/debug (H,W,3)
-            if img.dtype == torch.uint8:
-                img = img.to(torch.float32)
-            # Standard -1 to 1 normalization
-            img = torch.div(img, 127.5)
-            img = torch.sub(img, 1)
+            img.div_(127.5).sub_(1.0)
 
         # --- INFERENCE ---
         # Prepare data (N, C, H, W)
         img = torch.unsqueeze(img, 0).contiguous()
 
-        input_name = ort_session.get_inputs()[0].name
-        output_names = [o.name for o in ort_session.get_outputs()]
+        # FS-PERF-02: cache input/output names by session id to avoid repeated ONNX introspection
+        session_id = id(ort_session)
+        if session_id not in self._session_io_name_cache:
+            self._session_io_name_cache[session_id] = {
+                "input": ort_session.get_inputs()[0].name,
+                "outputs": [o.name for o in ort_session.get_outputs()],
+            }
+        input_name = self._session_io_name_cache[session_id]["input"]
+        output_names = self._session_io_name_cache[session_id]["outputs"]
 
         io_binding = ort_session.io_binding()
         io_binding.bind_input(
@@ -249,35 +264,36 @@ class FaceSwappers:
         return np.array(io_binding.copy_outputs_to_cpu()).flatten(), cropped_image
 
     def preprocess_image_cscs(self, img, face_kps):
-        # Use from_estimate
         tform = trans.SimilarityTransform.from_estimate(
             face_kps, self.models_processor.FFHQ_kps
         )
 
-        temp = v2.functional.affine(
-            img,
-            tform.rotation * 57.2958,
-            (tform.translation[0], tform.translation[1]),
-            tform.scale,
-            0,
-            center=(0, 0),
+        # OPTIMIZED: Direct GPU Warp to 512x512 using Kornia
+        M_tensor = (
+            torch.from_numpy(tform.params[0:2]).float().unsqueeze(0).to(img.device)
         )
-        temp = v2.functional.crop(temp, 0, 0, 512, 512)
+        img_b = img.unsqueeze(0) if img.dim() == 3 else img
+        temp = kgm.warp_affine(
+            img_b.float(),
+            M_tensor,
+            dsize=(512, 512),
+            mode="bilinear",
+            align_corners=True,
+        ).squeeze(0)
 
-        image = self.resize_112(temp)
+        # Fast resize to 112x112
+        image = v2.functional.resize(temp, [112, 112], antialias=True)
 
         cropped_image = image.permute(1, 2, 0).clone()
+
         if image.dtype == torch.uint8:
-            image = torch.div(image.to(torch.float32), 255.0)
+            image = image.float()
 
-        image = v2.functional.normalize(
-            image, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=False
-        )
+        # OPTIMIZED: In-place division and normalization
+        image.div_(255.0)
+        v2.functional.normalize(image, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True)
 
-        # Ritorna l'immagine e l'immagine ritagliata
-        return torch.unsqueeze(
-            image, 0
-        ).contiguous(), cropped_image  # (C, H, W) e (H, W, C)
+        return torch.unsqueeze(image, 0).contiguous(), cropped_image
 
     def recognize_cscs(self, img, face_kps):
         # Usa la funzione di preprocessamento
@@ -309,7 +325,12 @@ class FaceSwappers:
         embedding = embedding.numpy().flatten()
 
         embedding_id = self.recognize_cscs_id_adapter(img, None)
-        embedding = embedding + embedding_id
+        # FS-BUG-02: guard against empty embedding_id before combining
+        if embedding_id.size == embedding.size:
+            # FS-BUG-01: normalize the combined embedding to avoid magnitude blow-up
+            combined = embedding + embedding_id
+            norm = np.linalg.norm(combined)
+            embedding = combined / norm if norm > 1e-8 else combined
 
         return embedding, cropped_image
 
@@ -387,7 +408,17 @@ class FaceSwappers:
         # Run the model with lazy build handling
         self._run_model_with_lazy_build_check(model_name, model, io_binding)
 
-    def calc_inswapper_latent(self, source_embedding):
+    def _calc_emap_latent(self, source_embedding):
+        """FS-PERF-05: shared emap-based latent computation extracted from
+        calc_inswapper_latent and calc_swapper_latent_iss."""
+        n_e = source_embedding / l2norm(source_embedding)
+        latent = n_e.reshape((1, -1))
+        latent = np.dot(latent, self.models_processor.emap)
+        latent /= np.linalg.norm(latent)
+        return latent
+
+    def _ensure_emap(self):
+        """Ensures emap is loaded; returns True if available, False otherwise."""
         if (
             not hasattr(self.models_processor, "emap")
             or not isinstance(self.models_processor.emap, np.ndarray)
@@ -395,20 +426,19 @@ class FaceSwappers:
         ):
             self.models_processor.load_model("Inswapper128")
 
-        if (
-            not hasattr(self.models_processor, "emap")
-            or not isinstance(self.models_processor.emap, np.ndarray)
-            or self.models_processor.emap.size == 0
-        ):
-            print("[ERROR] Emap could not be loaded for latent calculation.")
-            n_e = source_embedding / l2norm(source_embedding)
-            return n_e.reshape((1, -1))
+        return (
+            hasattr(self.models_processor, "emap")
+            and isinstance(self.models_processor.emap, np.ndarray)
+            and self.models_processor.emap.size > 0
+        )
 
-        n_e = source_embedding / l2norm(source_embedding)
-        latent = n_e.reshape((1, -1))
-        latent = np.dot(latent, self.models_processor.emap)
-        latent /= np.linalg.norm(latent)
-        return latent
+    def calc_inswapper_latent(self, source_embedding):
+        if not self._ensure_emap():
+            print("[ERROR] Emap could not be loaded for latent calculation.")
+            # FS-ROBUST-01: return None so callers can detect and handle the failure
+            return None
+
+        return self._calc_emap_latent(source_embedding)
 
     def run_inswapper(self, image, embedding, output):
         model_name = "Inswapper128"
@@ -466,28 +496,13 @@ class FaceSwappers:
         return latent
 
     def calc_swapper_latent_iss(self, source_embedding, version="A"):
-        if (
-            not hasattr(self.models_processor, "emap")
-            or not isinstance(self.models_processor.emap, np.ndarray)
-            or self.models_processor.emap.size == 0
-        ):
-            print("[WARN] Emap not found, loading Inswapper128 to get it.")
-            self.models_processor.load_model("Inswapper128")
-
-        if (
-            not hasattr(self.models_processor, "emap")
-            or not isinstance(self.models_processor.emap, np.ndarray)
-            or self.models_processor.emap.size == 0
-        ):
+        # FS-PERF-05: reuse shared _ensure_emap / _calc_emap_latent helpers
+        if not self._ensure_emap():
             print("[ERROR] Emap could not be loaded for latent calculation.")
             n_e = source_embedding / l2norm(source_embedding)
             return n_e.reshape((1, -1))
 
-        n_e = source_embedding / l2norm(source_embedding)
-        latent = n_e.reshape((1, -1))
-        latent = np.dot(latent, self.models_processor.emap)
-        latent /= np.linalg.norm(latent)
-        return latent
+        return self._calc_emap_latent(source_embedding)
 
     def run_iss_swapper(self, image, embedding, output, version="A"):
         model_name = f"InStyleSwapper256 Version {version}"
@@ -570,13 +585,13 @@ class FaceSwappers:
     def run_swapper_ghostface(
         self, image, embedding, output, swapper_model="GhostFace-v2"
     ):
-        model_name, output_name = None, None
+        model_name = None
         if swapper_model == "GhostFace-v1":
-            model_name, output_name = "GhostFacev1", "781"
+            model_name = "GhostFacev1"
         elif swapper_model == "GhostFace-v2":
-            model_name, output_name = "GhostFacev2", "1165"
+            model_name = "GhostFacev2"
         elif swapper_model == "GhostFace-v3":
-            model_name, output_name = "GhostFacev3", "1549"
+            model_name = "GhostFacev3"
 
         if not model_name:
             print(f"[ERROR] Unknown GhostFace model version: {swapper_model}")
@@ -586,6 +601,15 @@ class FaceSwappers:
         if not ghostfaceswap_model:
             print(f"[ERROR] {model_name} model not loaded.")
             return
+
+        # FS-ROBUST-02: introspect output name dynamically instead of hardcoding node IDs
+        session_id = id(ghostfaceswap_model)
+        if session_id not in self._session_io_name_cache:
+            self._session_io_name_cache[session_id] = {
+                "input": ghostfaceswap_model.get_inputs()[0].name,
+                "outputs": [o.name for o in ghostfaceswap_model.get_outputs()],
+            }
+        output_name = self._session_io_name_cache[session_id]["outputs"][0]
 
         io_binding = ghostfaceswap_model.io_binding()
         io_binding.bind_input(

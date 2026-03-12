@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from torchvision.transforms import v2
 from skimage import transform as trans
+import kornia.geometry.transform as kgm
 
 if TYPE_CHECKING:
     from app.processors.models_processor import ModelsProcessor
@@ -14,12 +15,6 @@ class FaceRestorers:
         self.models_processor = models_processor
         self.active_model_slot1: Optional[str] = None
         self.active_model_slot2: Optional[str] = None
-        self.resize_transforms = {
-            512: v2.Resize((512, 512), antialias=True),
-            256: v2.Resize((256, 256), antialias=False),
-            1024: v2.Resize((1024, 1024), antialias=False),
-            2048: v2.Resize((2048, 2048), antialias=False),
-        }
         self._warned_models: set[str] = set()  # To track warnings
         self.model_map = {
             "GFPGAN-v1.4": "GFPGANv1.4",
@@ -113,10 +108,6 @@ class FaceRestorers:
         # control_actions.handle_restorer_state_change and handle_model_selection_change.
 
         temp = swapped_face_upscaled
-        t512 = self.resize_transforms[512]
-        t256 = self.resize_transforms[256]
-        t1024 = self.resize_transforms[1024]
-        t2048 = self.resize_transforms[2048]
 
         # If using a separate detection mode
         if restorer_det_type == "Blend" or restorer_det_type == "Reference":
@@ -134,10 +125,6 @@ class FaceRestorers:
                     return swapped_face_upscaled
                 dst = target_kps
 
-            # Return non-enhanced face if keypoints are empty
-            if not isinstance(dst, np.ndarray) or len(dst) == 0:
-                return swapped_face_upscaled
-
             try:
                 # Use from_estimate constructor instead of .estimate()
                 if hasattr(trans.SimilarityTransform, "from_estimate"):
@@ -149,33 +136,48 @@ class FaceRestorers:
                     tform.estimate(dst, self.models_processor.FFHQ_kps)
             except Exception:
                 return swapped_face_upscaled
-            # Transform, scale, and normalize
-            temp = v2.functional.affine(
-                swapped_face_upscaled,
-                tform.rotation * 57.2958,
-                (tform.translation[0], tform.translation[1]),
-                tform.scale,
-                0,
-                center=(0, 0),
+            # OPTIMIZED: Direct GPU Affine Warp with Kornia, skipping torchvision crop/affine
+            M_tensor = (
+                torch.from_numpy(tform.params[0:2])
+                .float()
+                .unsqueeze(0)
+                .to(swapped_face_upscaled.device)
             )
-            temp = v2.functional.crop(temp, 0, 0, 512, 512)
+            img_b = (
+                swapped_face_upscaled.unsqueeze(0)
+                if swapped_face_upscaled.dim() == 3
+                else swapped_face_upscaled
+            )
 
-        temp = torch.div(temp, 255)
+            temp = kgm.warp_affine(
+                img_b.float(),
+                M_tensor,
+                dsize=(512, 512),
+                mode="bilinear",
+                align_corners=True,
+            ).squeeze(0)
+
+        # OPTIMIZED: In-place division and functional normalize to save VRAM allocations
+        temp = temp.float().div_(255.0)
         temp = v2.functional.normalize(
-            temp, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=False
+            temp, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True
         )
 
         if restorer_type == "GPEN-256":
-            temp = t256(temp)
+            temp = v2.functional.resize(temp, [256, 256], antialias=False)
 
         temp = torch.unsqueeze(temp, 0).contiguous()
 
         # Bindings
-        outpred = torch.empty(
-            (1, 3, 512, 512), dtype=torch.float32, device=self.models_processor.device
-        ).contiguous()
+        # FR-ROBUST-04: removed default 512x512 pre-allocation; each branch allocates at correct size
+        outpred = None
 
         if restorer_type == "GFPGAN-v1.4":
+            outpred = torch.empty(
+                (1, 3, 512, 512),
+                dtype=torch.float32,
+                device=self.models_processor.device,
+            ).contiguous()
             self.run_GFPGAN(temp, outpred)
 
         elif restorer_type == "GFPGAN-1024":
@@ -187,6 +189,11 @@ class FaceRestorers:
             self.run_GFPGAN1024(temp, outpred)
 
         elif restorer_type == "CodeFormer":
+            outpred = torch.empty(
+                (1, 3, 512, 512),
+                dtype=torch.float32,
+                device=self.models_processor.device,
+            ).contiguous()
             self.run_codeformer(temp, outpred, fidelity_weight)
 
         elif restorer_type == "GPEN-256":
@@ -198,10 +205,15 @@ class FaceRestorers:
             self.run_GPEN_256(temp, outpred)
 
         elif restorer_type == "GPEN-512":
+            outpred = torch.empty(
+                (1, 3, 512, 512),
+                dtype=torch.float32,
+                device=self.models_processor.device,
+            ).contiguous()
             self.run_GPEN_512(temp, outpred)
 
         elif restorer_type == "GPEN-1024":
-            temp = t1024(temp)
+            temp = v2.functional.resize(temp, [1024, 1024], antialias=False)
             outpred = torch.empty(
                 (1, 3, 1024, 1024),
                 dtype=torch.float32,
@@ -210,7 +222,7 @@ class FaceRestorers:
             self.run_GPEN_1024(temp, outpred)
 
         elif restorer_type == "GPEN-2048":
-            temp = t2048(temp)
+            temp = v2.functional.resize(temp, [2048, 2048], antialias=False)
             outpred = torch.empty(
                 (1, 3, 2048, 2048),
                 dtype=torch.float32,
@@ -219,39 +231,53 @@ class FaceRestorers:
             self.run_GPEN_2048(temp, outpred)
 
         elif restorer_type == "RestoreFormer++":
+            outpred = torch.empty(
+                (1, 3, 512, 512),
+                dtype=torch.float32,
+                device=self.models_processor.device,
+            ).contiguous()
             self.run_RestoreFormerPlusPlus(temp, outpred)
 
         elif restorer_type == "VQFR-v2":
+            outpred = torch.empty(
+                (1, 3, 512, 512),
+                dtype=torch.float32,
+                device=self.models_processor.device,
+            ).contiguous()
             self.run_VQFR_v2(temp, outpred, fidelity_weight)
 
-        # Format back to cxHxW @ 255
-        outpred = torch.squeeze(outpred)
-        outpred = torch.clamp(outpred, -1, 1)
-        outpred = torch.add(outpred, 1)
-        outpred = torch.div(outpred, 2)
-        outpred = torch.mul(outpred, 255)
+        if outpred is None:
+            return swapped_face_upscaled
 
-        if (
-            restorer_type == "GPEN-256"
-            or restorer_type == "GPEN-1024"
-            or restorer_type == "GPEN-2048"
-            or restorer_type == "GFPGAN-1024"
-        ):
-            outpred = t512(outpred)
+        # OPTIMIZED: Fused in-place math operations to save VRAM allocations.
+        # Math: ((x clamped [-1, 1]) + 1.0) * 127.5 is equivalent to /2 * 255.
+        outpred = outpred.squeeze(0).clamp_(-1.0, 1.0).add_(1.0).mul_(127.5)
+
+        if restorer_type in ["GPEN-256", "GPEN-1024", "GPEN-2048", "GFPGAN-1024"]:
+            outpred = v2.functional.resize(outpred, [512, 512], antialias=True)
 
         # Invert Transform
         if restorer_det_type == "Blend" or restorer_det_type == "Reference":
-            outpred = v2.functional.affine(
-                outpred,
-                tform.inverse.rotation * 57.2958,
-                (tform.inverse.translation[0], tform.inverse.translation[1]),
-                tform.inverse.scale,
-                0,
-                interpolation=v2.InterpolationMode.BILINEAR,
-                center=(0, 0),
+            # OPTIMIZED: Direct Inverse GPU Affine Warp with Kornia
+            M_inv_tensor = (
+                torch.from_numpy(tform.inverse.params[0:2])
+                .float()
+                .unsqueeze(0)
+                .to(outpred.device)
             )
+            out_b = outpred.unsqueeze(0) if outpred.dim() == 3 else outpred
+            dsize = (swapped_face_upscaled.shape[1], swapped_face_upscaled.shape[2])
 
-        # Blend
+            outpred = kgm.warp_affine(
+                out_b,
+                M_inv_tensor,
+                dsize=(dsize[0], dsize[1]),
+                mode="bilinear",
+                padding_mode="zeros",
+                align_corners=True,
+            ).squeeze(0)
+
+        # Blend (Disabled by default as in original code)
         # alpha = float(restorer_blend)/100.0
         # outpred = torch.add(torch.mul(outpred, alpha), torch.mul(swapped_face_upscaled, 1-alpha))
 
@@ -266,13 +292,12 @@ class FaceRestorers:
         output_latent_tensor: Placeholder for Batch x 8 x LatentH x LatentW, float32
         """
         model_name = "RefLDMVAEEncoder"
-        ort_session = self.models_processor.models[model_name]
-        if not ort_session:
+        # FR-BUG-04: use .get() to avoid KeyError when model is not yet loaded
+        ort_session = self.models_processor.models.get(model_name)
+        if ort_session is None:
             error_msg = f"[ERROR] VAE Encoder model '{model_name}' not loaded when run_vae_encoder was called. This model should be loaded by ModelsProcessor.ensure_denoiser_models_loaded()."
             print(error_msg)
-            raise RuntimeError(
-                error_msg
-            )  # Or handle more gracefully depending on desired behavior
+            raise RuntimeError(error_msg)
 
         input_name = (
             ort_session.get_inputs()[0].name
@@ -315,8 +340,9 @@ class FaceRestorers:
         output_image_tensor: Placeholder for Batch x 3 x H x W, float32, normalized to [-1, 1]
         """
         model_name = "RefLDMVAEDecoder"
-        ort_session = self.models_processor.models[model_name]
-        if not ort_session:
+        # FR-BUG-04: use .get() to avoid KeyError when model is not yet loaded
+        ort_session = self.models_processor.models.get(model_name)
+        if ort_session is None:
             error_msg = f"[ERROR] VAE Decoder model '{model_name}' not loaded when run_vae_decoder was called. This model should be loaded by ModelsProcessor.ensure_denoiser_models_loaded()."
             print(error_msg)
             raise RuntimeError(error_msg)
@@ -460,7 +486,9 @@ class FaceRestorers:
                     )
 
         # IMPORTANT: Keep references to temporary zero tensors to prevent GC
-        keep_alive_tensors = []
+        keep_alive_tensors: list = []
+        # FS-MEM-01: also keep actual KV tensors alive to prevent premature GC
+        keep_alive_tensors.extend(actual_kv_tensors_for_binding.values())
 
         for onnx_kv_name, expected_shape in onnx_kv_input_names_to_shape.items():
             tensor_to_bind = actual_kv_tensors_for_binding.get(onnx_kv_name)
@@ -692,9 +720,11 @@ class FaceRestorers:
         if not ort_session:
             return  # Silently skip
 
-        assert fidelity_ratio_value >= 0.0 and fidelity_ratio_value <= 1.0, (
-            "fidelity_ratio must in range[0,1]"
-        )
+        # FR-ROBUST-05: replace assert with an explicit ValueError so it is never silenced by -O flag
+        if not (0.0 <= fidelity_ratio_value <= 1.0):
+            raise ValueError(
+                f"fidelity_ratio_value must be in [0,1], got {fidelity_ratio_value}"
+            )
         fidelity_ratio = torch.tensor(fidelity_ratio_value).to(
             self.models_processor.device
         )

@@ -2,14 +2,14 @@ import os
 import shutil
 import cv2
 import time
-from collections import UserDict
+from collections import UserDict, OrderedDict
 import hashlib
 import numpy as np
 from functools import wraps
 from datetime import datetime
 from pathlib import Path
 from torchvision.transforms import v2
-from typing import Dict, Tuple, Optional
+from typing import Dict, Mapping, Tuple, Optional, Any
 import threading
 import subprocess
 import json
@@ -22,8 +22,10 @@ lock = threading.Lock()
 
 # --- Global Scope ---
 
-# scaling transforms cache dictionary at the module level
-_transform_cache: Dict[tuple, tuple] = {}
+# Scaling transforms cache — bounded LRU so long sessions with many interpolation
+# setting changes cannot grow this indefinitely.  In practice 2–5 entries are used.
+_transform_cache: OrderedDict = OrderedDict()
+_TRANSFORM_CACHE_MAX = 32
 image_extensions = (
     ".jpg",
     ".jpeg",
@@ -76,6 +78,7 @@ class ThumbnailManager:
                                  created in the current working directory.
         """
         self.thumbnail_dir = os.path.join(os.getcwd(), thumbnail_dir)
+        self._lock = threading.Lock()
         self._ensure_directory()
 
     def _ensure_directory(self) -> None:
@@ -126,10 +129,11 @@ class ThumbnailManager:
             str | None: The path to the existing thumbnail, or None if it doesn't exist.
         """
         png_path, jpg_path = self.get_thumbnail_path(file_path)
-        if os.path.exists(png_path):
-            return png_path
-        if os.path.exists(jpg_path):
-            return jpg_path
+        with self._lock:
+            if os.path.exists(png_path):
+                return png_path
+            if os.path.exists(jpg_path):
+                return jpg_path
         return None
 
     def create_thumbnail(self, frame: np.ndarray, file_path: str) -> None:
@@ -161,7 +165,8 @@ class ThumbnailManager:
         )
 
         try:
-            cv2.imwrite(png_path, resized_frame)
+            with self._lock:
+                cv2.imwrite(png_path, resized_frame)
             if os.path.getsize(png_path) > 30 * 1024:  # If PNG is > 30KB
                 os.remove(png_path)
                 raise Exception("PNG file too large, falling back to JPEG.")
@@ -174,7 +179,8 @@ class ThumbnailManager:
                 cv2.IMWRITE_JPEG_PROGRESSIVE,
                 1,
             ]
-            cv2.imwrite(jpg_path, resized_frame, jpeg_params)
+            with self._lock:
+                cv2.imwrite(jpg_path, resized_frame, jpeg_params)
 
 
 class DFMModelManager:
@@ -277,6 +283,7 @@ def get_scaling_transforms(control_params: dict) -> tuple:
 
     # Performance check: If this exact configuration is already in the cache, return it immediately.
     if config_key in _transform_cache:
+        _transform_cache.move_to_end(config_key)  # refresh LRU position
         return _transform_cache[config_key]
 
     # --- If not cached, create the new set of transforms ---
@@ -364,6 +371,9 @@ def get_scaling_transforms(control_params: dict) -> tuple:
     )
 
     # Save the result in the cache before returning it.
+    # Evict the oldest entry first if the cache is at capacity (LRU).
+    if len(_transform_cache) >= _TRANSFORM_CACHE_MAX:
+        _transform_cache.popitem(last=False)
     _transform_cache[config_key] = result
 
     return result
@@ -828,8 +838,16 @@ def tensor_to_pil(tensor: torch.Tensor) -> Image.Image:
 
 
 def keypoints_adjustments(
-    kps_5: np.ndarray, parameters: dict, source_kps: np.ndarray = None
+    kps_5: np.ndarray,
+    parameters: Mapping[str, Any],
+    source_kps: Optional[np.ndarray] = None,
 ) -> np.ndarray:
+    """
+    Adjusts facial keypoints for morphing and manual alignments.
+    Upgraded to use OpenCV's robust Partial Affine Transform (LMEDS) to estimate
+    rotation, translation, and uniform scaling while actively ignoring outliers
+    caused by blur or obstruction (prevents frame-to-frame ghosting).
+    """
     kps_5_adj = kps_5.copy()
 
     if (
@@ -840,23 +858,35 @@ def keypoints_adjustments(
 
         if morph_amount > 0.0:
             try:
-                if hasattr(trans.SimilarityTransform, "from_estimate"):
-                    tform = trans.SimilarityTransform.from_estimate(
-                        source_kps, kps_5_adj
-                    )
+                # --- ROBUST SIMILARITY ALIGNMENT (OpenCV) ---
+                # Computes optimal similarity transform (Translation, Rotation, Uniform Scale).
+                # LMEDS is used over manual SVD to ignore corrupted keypoints (blur/occlusion)
+                # and strictly prevent the determinant flipping that causes doubling.
+                tform_matrix, _ = cv2.estimateAffinePartial2D(
+                    source_kps, kps_5_adj, method=cv2.LMEDS
+                )
+
+                if tform_matrix is not None:
+                    # Pad source keypoints with ones for matrix multiplication: [x, y] -> [x, y, 1]
+                    ones = np.ones((source_kps.shape[0], 1), dtype=source_kps.dtype)
+                    src_padded = np.hstack([source_kps, ones])
+
+                    # Apply transformation: Matrix (2x3) dot Padded_Points (3x5) -> Transpose to (5x2)
+                    source_kps_aligned = np.dot(tform_matrix, src_padded.T).T
+
+                    # Apply linear interpolation (Morphing)
+                    kps_5_adj = (
+                        kps_5_adj + morph_amount * (source_kps_aligned - kps_5_adj)
+                    ).astype(np.float32)
                 else:
-                    tform = trans.SimilarityTransform()
-                    tform.estimate(source_kps, kps_5_adj)
-
-                source_kps_aligned = tform(source_kps)
-
-                kps_5_adj = (
-                    kps_5_adj + morph_amount * (source_kps_aligned - kps_5_adj)
-                ).astype(np.float32)
+                    print(
+                        "[WARNING] Alignment failed due to severe keypoint corruption. Bypassing."
+                    )
 
             except Exception as e:
                 print(f"[WARNING] Face Keypoints Morphing bypassed: {e}")
 
+    # --- MANUAL ALIGNMENTS (Sliders) ---
     if parameters.get("FaceAdjEnableToggle", False):
         kps_5_adj[:, 0] += parameters["KpsXSlider"]
         kps_5_adj[:, 1] += parameters["KpsYSlider"]
@@ -867,7 +897,10 @@ def keypoints_adjustments(
         kps_5_adj[:, 1] *= 1 + parameters["KpsScaleSlider"] / 100.0
         kps_5_adj[:, 1] += 255
 
-    if parameters.get("LandmarksPositionAdjEnableToggle", False):
+    if (
+        parameters.get("LandmarksPositionAdjEnableToggle", False)
+        and kps_5_adj.shape[0] >= 5
+    ):
         kps_5_adj[0][0] += parameters["EyeLeftXAmountSlider"]
         kps_5_adj[0][1] += parameters["EyeLeftYAmountSlider"]
         kps_5_adj[1][0] += parameters["EyeRightXAmountSlider"]
@@ -891,69 +924,49 @@ def get_grid_for_pasting(
     device: torch.device,
 ):
     """
-    Generates a sampling grid for torch.nn.functional.grid_sample to warp content
-    back to the target frame coordinates.
+    OPTIMIZED: Generates a sampling grid for grid_sample.
+    Eliminated memory-heavy meshgrid, cat, and massive matmul operations.
+    Uses fast 1D tensor broadcasting instead, saving massive amounts of VRAM.
     """
-    # tform_target_to_source: maps points from target (e.g. full image) to source (e.g. 512x512 face)
-    grid_y, grid_x = torch.meshgrid(
-        torch.arange(target_h, device=device, dtype=torch.float32),
-        torch.arange(target_w, device=device, dtype=torch.float32),
-        indexing="ij",
-    )
-    target_grid_yx_pixels = torch.stack((grid_y, grid_x), dim=2).unsqueeze(
-        0
-    )  # 1xTargetHxTargetWx2 (Y,X order)
-
-    # Convert target grid pixel coordinates to homogeneous coordinates (X,Y,1)
-    target_grid_xy_flat_pixels = target_grid_yx_pixels[..., [1, 0]].reshape(
-        -1, 2
-    )  # (N,2) in XY
-    ones = torch.ones(
-        target_grid_xy_flat_pixels.shape[0], 1, device=device, dtype=torch.float32
-    )
-    homogeneous_target_grid_xy_pixels = torch.cat(
-        (target_grid_xy_flat_pixels, ones), dim=1
-    )  # (N,3)
-
     # Transformation matrix from tform_target_to_source (2x3)
-    M_target_to_source = torch.tensor(
+    M = torch.tensor(
         tform_target_to_source.params[0:2, :], dtype=torch.float32, device=device
     )
 
-    # Transform target grid to source coordinates (pixels)
-    # (N,3) @ (3,2) -> (N,2) in XY order
-    source_coords_xy_flat_pixels = torch.matmul(
-        homogeneous_target_grid_xy_pixels, M_target_to_source.T
+    # Create 1D vectors for coordinates (H, 1) and (1, W)
+    y = torch.arange(target_h, device=device, dtype=torch.float32).view(-1, 1)
+    x = torch.arange(target_w, device=device, dtype=torch.float32).view(1, -1)
+
+    # Apply affine transformation using automatic broadcasting -> results in (H, W)
+    src_x = x * M[0, 0] + y * M[0, 1] + M[0, 2]
+    src_y = x * M[1, 0] + y * M[1, 1] + M[1, 2]
+
+    # Normalize source coordinates directly for grid_sample [-1, 1]
+    src_x_norm = (src_x / (source_w - 1.0)) * 2.0 - 1.0
+    src_y_norm = (src_y / (source_h - 1.0)) * 2.0 - 1.0
+
+    # Stack to create the final normalized grid: 1 x H x W x 2
+    source_grid_normalized_xy = torch.stack((src_x_norm, src_y_norm), dim=-1).unsqueeze(
+        0
     )
 
-    # Reshape to grid format 1xTargetHxTargetWx2
-    source_coords_xy_grid_pixels = source_coords_xy_flat_pixels.view(
-        1, target_h, target_w, 2
-    )
+    # Recreate target_grid_yx_pixels (returned for completeness)
+    grid_y = y.expand(target_h, target_w)
+    grid_x = x.expand(target_h, target_w)
+    target_grid_yx_pixels = torch.stack((grid_y, grid_x), dim=-1).unsqueeze(0)
 
-    # Normalize source coordinates for grid_sample (expects XY order, range [-1,1])
-    source_grid_normalized_xy = torch.empty_like(source_coords_xy_grid_pixels)
-    # Normalize X coordinates
-    source_grid_normalized_xy[..., 0] = (
-        source_coords_xy_grid_pixels[..., 0] / (source_w - 1.0)
-    ) * 2.0 - 1.0
-    # Normalize Y coordinates
-    source_grid_normalized_xy[..., 1] = (
-        source_coords_xy_grid_pixels[..., 1] / (source_h - 1.0)
-    ) * 2.0 - 1.0
-
-    # target_grid_yx is not strictly needed by grid_sample but returned for completeness if ever useful
     return target_grid_yx_pixels, source_grid_normalized_xy
 
 
 def draw_bounding_boxes_on_detected_faces(
-    img: torch.Tensor, det_faces_data: list
+    img: torch.Tensor, det_faces_data: list, color_rgb: list | None = None
 ) -> torch.Tensor:
     """
-    Draws bounding boxes on the image tensor based on detection data.
+    OPTIMIZED: Removed unnecessary .expand() calls.
+    Relies on PyTorch's native C++ broadcasting for instant assignment.
     """
+    _color = color_rgb if color_rgb is not None else [0, 255, 0]
     for i, fface in enumerate(det_faces_data):
-        color_rgb = [0, 255, 0]
         bbox = fface["bbox"]
         x_min, y_min, x_max, y_max = map(int, bbox)
 
@@ -967,28 +980,22 @@ def draw_bounding_boxes_on_detected_faces(
         thickness = max(4, max_dimension // 400)
 
         color_tensor_c11 = torch.tensor(
-            color_rgb, dtype=img.dtype, device=img.device
+            _color, dtype=img.dtype, device=img.device
         ).view(-1, 1, 1)
 
-        img[:, y_min : y_min + thickness, x_min : x_max + 1] = color_tensor_c11.expand(
-            -1, thickness, x_max - x_min + 1
-        )
-        img[:, y_max - thickness + 1 : y_max + 1, x_min : x_max + 1] = (
-            color_tensor_c11.expand(-1, thickness, x_max - x_min + 1)
-        )
-        img[:, y_min : y_max + 1, x_min : x_min + thickness] = color_tensor_c11.expand(
-            -1, y_max - y_min + 1, thickness
-        )
-        img[:, y_min : y_max + 1, x_max - thickness + 1 : x_max + 1] = (
-            color_tensor_c11.expand(-1, y_max - y_min + 1, thickness)
-        )
+        # PyTorch handles the broadcasting automatically, no need to expand()
+        img[:, y_min : y_min + thickness, x_min : x_max + 1] = color_tensor_c11
+        img[:, y_max - thickness + 1 : y_max + 1, x_min : x_max + 1] = color_tensor_c11
+        img[:, y_min : y_max + 1, x_min : x_min + thickness] = color_tensor_c11
+        img[:, y_min : y_max + 1, x_max - thickness + 1 : x_max + 1] = color_tensor_c11
+
     return img
 
 
 def paint_landmarks_on_image(img: torch.Tensor, landmarks_data: list) -> torch.Tensor:
     """
-    Draws landmarks on the image tensor.
-    landmarks_data: List of dicts {'kps': np.ndarray, 'color': tuple}
+    OPTIMIZED: Replaced deeply nested loops and per-pixel tensor allocations
+    with tensor slicing and pre-allocated colors to eliminate CPU bottlenecks.
     """
     img_out_hwc = img.clone()
     p = 2
@@ -997,16 +1004,19 @@ def paint_landmarks_on_image(img: torch.Tensor, landmarks_data: list) -> torch.T
         keypoints = item["kps"]
         kcolor = item["color"]
         if keypoints is not None:
+            # OPTIMIZATION: Allocate the color tensor ONCE per face, not per pixel
+            kcolor_tensor = torch.tensor(kcolor, device=img.device, dtype=img.dtype)
+
             for kpoint in keypoints:
                 kx, ky = int(kpoint[0]), int(kpoint[1])
-                for i_offset in range(-p // 2, p // 2 + 1):
-                    for j_offset in range(-p // 2, p // 2 + 1):
-                        final_y, final_x = ky + i_offset, kx + j_offset
-                        if (
-                            0 <= final_y < img_out_hwc.shape[0]
-                            and 0 <= final_x < img_out_hwc.shape[1]
-                        ):
-                            img_out_hwc[final_y, final_x] = torch.tensor(
-                                kcolor, device=img.device, dtype=img.dtype
-                            )
+
+                # OPTIMIZATION: Use direct slicing instead of nested loops
+                y_min = max(0, ky - p // 2)
+                y_max = min(img_out_hwc.shape[0], ky + p // 2 + 1)
+                x_min = max(0, kx - p // 2)
+                x_max = min(img_out_hwc.shape[1], kx + p // 2 + 1)
+
+                if y_min < y_max and x_min < x_max:
+                    img_out_hwc[y_min:y_max, x_min:x_max] = kcolor_tensor
+
     return img_out_hwc

@@ -1,6 +1,7 @@
 import hashlib
 import os
 import urllib
+import urllib.request
 import warnings
 from typing import Union, List, Optional
 from pkg_resources import packaging

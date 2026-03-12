@@ -94,12 +94,17 @@ class TargetMediaLoaderWorker(qtc.QThread):
         self.main_window.placeholder_update_signal.emit(
             self.main_window.targetVideosList, True
         )
-        media_files = files_list
-        # Sorting the list
-        media_files.sort(key=lambda x: os.path.basename(str(x)).lower())
 
-        i = 0
-        for media_file_path in media_files:
+        # Associate ID and Paths before sorting
+        paired_files_ids = []
+        for idx, path in enumerate(files_list):
+            m_id = self.media_ids[idx] if self.media_ids else str(uuid.uuid1().int)
+            paired_files_ids.append((path, m_id))
+
+        # Alphabetical sorting on filename only
+        paired_files_ids.sort(key=lambda x: os.path.basename(str(x[0])).lower())
+
+        for media_file_path, media_id in paired_files_ids:
             if not self._running:  # Check if the thread is still running
                 break
             if not os.path.exists(media_file_path):
@@ -108,14 +113,10 @@ class TargetMediaLoaderWorker(qtc.QThread):
             pixmap = common_widget_actions.extract_frame_as_pixmap(
                 self.main_window, media_file_path, file_type=file_type
             )
-            if self.media_ids:
-                media_id = self.media_ids[i]
-            else:
-                media_id = str(uuid.uuid1().int)
             if pixmap:
                 # Emit the signal to update GUI
                 self.thumbnail_ready.emit(media_file_path, pixmap, file_type, media_id)
-            i += 1
+
         self.main_window.placeholder_update_signal.emit(
             self.main_window.targetVideosList, False
         )
@@ -154,7 +155,10 @@ class TargetMediaLoaderWorker(qtc.QThread):
     def stop(self):
         """Stop the thread by setting the running flag to False."""
         self._running = False
-        self.wait()
+        self.quit()
+        self.wait(1000)
+        if self.isRunning():
+            self.terminate()
 
 
 class InputFacesLoaderWorker(qtc.QThread):
@@ -201,27 +205,37 @@ class InputFacesLoaderWorker(qtc.QThread):
     def load_faces(self, folder_name=False, files_list=None):
         control = self.main_window.control.copy()
         files_list = files_list or []
-        image_files = []
+
+        # OPTIMIZED: Pair the file paths with their correct IDs before any processing
+        # This prevents ID shifting if an image fails, and avoids destructive sorting.
+        paired_files_ids = []
+
         if folder_name:
             image_files = misc_helpers.get_image_files(
                 self.folder_name,
                 self.main_window.control["InputFacesFolderRecursiveToggle"],
             )
+            image_files.sort()  # Safe to sort here, IDs are generated fresh
+            for path in image_files:
+                paired_files_ids.append(
+                    (os.path.join(folder_name, path), str(uuid.uuid1().int))
+                )
         elif files_list:
-            image_files = list(files_list)
+            # DO NOT SORT if loading from a workspace, keep original saved order
+            for idx, path in enumerate(files_list):
+                f_id = self.face_ids[idx] if self.face_ids else str(uuid.uuid1().int)
+                paired_files_ids.append((path, f_id))
 
-        i = 0
-        image_files.sort()
-        for image_file_path in image_files:
+        for image_file_path, face_id in paired_files_ids:
             if not self._running:  # Check if the thread is still running
                 break
             if not misc_helpers.is_image_file(image_file_path):
                 continue
-            if folder_name:
-                image_file_path = os.path.join(folder_name, image_file_path)
+
             frame = misc_helpers.read_image_file(image_file_path)
             if frame is None:
                 continue
+
             # Frame must be in RGB format
             frame = frame[..., ::-1]  # Swap the channels from BGR to RGB
 
@@ -275,26 +289,23 @@ class InputFacesLoaderWorker(qtc.QThread):
                     "kps_5": face_kps,
                 }
 
-                if not self.face_ids:
-                    face_id = str(uuid.uuid1().int)
-                else:
-                    face_id = self.face_ids[i]
-
                 self.thumbnail_ready.emit(
                     image_file_path, face_img, embedding_store, pixmap, face_id
                 )
-                i += 1
 
         torch.cuda.empty_cache()
 
     def stop(self):
         """Stop the thread by setting the running flag to False."""
         self._running = False
-        self.wait()
+        self.quit()
+        self.wait(1000)
+        if self.isRunning():
+            self.terminate()
 
 
 class FilterWorker(qtc.QThread):
-    filtered_results = qtc.Signal(list)
+    filtered_results = qtc.Signal(list, int)  # (visible_indices, snapshot_size)
 
     def __init__(
         self, main_window: "MainWindow", search_text="", filter_list="target_videos"
@@ -303,6 +314,10 @@ class FilterWorker(qtc.QThread):
         self.main_window = main_window
         self.search_text = search_text
         self.filter_list = filter_list
+        # Snapshot attributes set by filter_actions before start() is called.
+        # Initialised to safe empty defaults so the worker never accesses Qt widgets.
+        self.items_snapshot: list = []
+        self.include_file_types: list = []
         self.filter_list_widget = self.get_list_widget()
         self.filtered_results.connect(
             partial(
@@ -328,56 +343,47 @@ class FilterWorker(qtc.QThread):
         self,
     ):
         if self.filter_list == "target_videos":
-            self.filter_target_videos(self.main_window, self.search_text)
+            self.filter_target_videos()
         elif self.filter_list == "input_faces":
-            self.filter_input_faces(self.main_window, self.search_text)
+            self.filter_input_faces()
         elif self.filter_list == "merged_embeddings":
-            self.filter_merged_embeddings(self.main_window, self.search_text)
+            self.filter_merged_embeddings()
 
-    def filter_target_videos(self, main_window: "MainWindow", search_text: str = ""):
-        search_text = main_window.targetVideosSearchBox.text().lower()
-        include_file_types = []
-        if main_window.filterImagesCheckBox.isChecked():
-            include_file_types.append("image")
-        if main_window.filterVideosCheckBox.isChecked():
-            include_file_types.append("video")
-        if main_window.filterWebcamsCheckBox.isChecked():
-            include_file_types.append("webcam")
+    def filter_target_videos(self):
+        # Operates only on pre-captured plain Python data — no Qt widget access.
+        search_text = self.search_text
+        include_file_types = self.include_file_types
 
         visible_indices = []
-        for i in range(main_window.targetVideosList.count()):
-            item = main_window.targetVideosList.item(i)
-            item_widget = main_window.targetVideosList.itemWidget(item)
-            if (not search_text or search_text in item_widget.media_path.lower()) and (
-                item_widget.file_type in include_file_types
+        for index, media_path, file_type in self.items_snapshot:
+            if (not search_text or search_text in media_path.lower()) and (
+                file_type in include_file_types
             ):
-                visible_indices.append(i)
+                visible_indices.append(index)
 
-        self.filtered_results.emit(visible_indices)
+        self.filtered_results.emit(visible_indices, len(self.items_snapshot))
 
-    def filter_input_faces(self, main_window: "MainWindow", search_text: str):
-        search_text = search_text.lower()
+    def filter_input_faces(self):
+        # Operates only on pre-captured plain Python data — no Qt widget access.
+        search_text = self.search_text
+
         visible_indices = []
+        for index, media_path in self.items_snapshot:
+            if not search_text or search_text in media_path.lower():
+                visible_indices.append(index)
 
-        for i in range(main_window.inputFacesList.count()):
-            item = main_window.inputFacesList.item(i)
-            item_widget = main_window.inputFacesList.itemWidget(item)
-            if not search_text or search_text in item_widget.media_path.lower():
-                visible_indices.append(i)
+        self.filtered_results.emit(visible_indices, len(self.items_snapshot))
 
-        self.filtered_results.emit(visible_indices)
+    def filter_merged_embeddings(self):
+        # Operates only on pre-captured plain Python data — no Qt widget access.
+        search_text = self.search_text
 
-    def filter_merged_embeddings(self, main_window: "MainWindow", search_text: str):
-        search_text = search_text.lower()
         visible_indices = []
+        for index, embedding_name in self.items_snapshot:
+            if not search_text or search_text in embedding_name.lower():
+                visible_indices.append(index)
 
-        for i in range(main_window.inputEmbeddingsList.count()):
-            item = main_window.inputEmbeddingsList.item(i)
-            item_widget = main_window.inputEmbeddingsList.itemWidget(item)
-            if not search_text or search_text in item_widget.embedding_name.lower():
-                visible_indices.append(i)
-
-        self.filtered_results.emit(visible_indices)
+        self.filtered_results.emit(visible_indices, len(self.items_snapshot))
 
     def stop_thread(self):
         self.quit()

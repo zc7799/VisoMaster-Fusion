@@ -86,6 +86,26 @@
           </widget>
          </item>
          <item>
+          <widget class="QPushButton" name="theatreModeButton">
+           <property name="text">
+            <string>Theatre</string>
+           </property>
+           <property name="flat">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QCheckBox" name="theatreModeCheckBox">
+           <property name="visible">
+            <bool>false</bool>
+           </property>
+           <property name="text">
+            <string/>
+           </property>
+          </widget>
+         </item>
+         <item>
           <spacer name="horizontalSpacer_8">
            <property name="orientation">
             <enum>Qt::Orientation::Horizontal</enum>

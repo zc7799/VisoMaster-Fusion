@@ -1,10 +1,4 @@
 import numpy as np
-from collections import deque
-import os
-import os.path as osp
-import copy
-import torch
-import torch.nn.functional as F
 
 from .kalman_filter import KalmanFilter
 from app.processors.external.yolox.tracker import matching
@@ -171,8 +165,10 @@ class BYTETracker(object):
             scores = output_results[:, 4] * output_results[:, 5]
             bboxes = output_results[:, :4]  # x1y1x2y2
         img_h, img_w = img_info[0], img_info[1]
+        # NOTE: img_info == img_size (both set to img_hw) because the frame is not rescaled
+        # before detection. If model input ever differs from frame size, update both values.
         scale = min(img_size[0] / float(img_h), img_size[1] / float(img_w))
-        bboxes /= scale
+        bboxes = bboxes / scale  # non-in-place: safe even when input is reused after ByteTracker
 
         remain_inds = scores > self.args.track_thresh
         inds_low = scores > 0.1

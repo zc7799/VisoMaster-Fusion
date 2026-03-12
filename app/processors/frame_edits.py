@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 import torch
 import numpy as np
 from torchvision.transforms import v2
-from skimage import transform as trans
+import kornia.geometry.transform as kgm
 
 from app.processors.utils import faceutil
 
@@ -33,15 +33,28 @@ class FrameEdits:
         self.models_processor = models_processor
 
         # Transforms will be updated per frame/settings via set_transforms
-        self.t256_face = None
+        self.t256_face: v2.Resize = v2.Resize(
+            (256, 256),
+            interpolation=v2.InterpolationMode.BILINEAR,
+        )
         self.interpolation_expression_faceeditor_back = None
 
     def set_transforms(self, t256_face, interpolation_expression_faceeditor_back):
         """
         Updates the scaling transforms and interpolation modes based on current control settings.
         Called from FrameWorker.set_scaling_transforms.
+
+        Always sets self.t256_face so callers never fall back to a lazy init that
+        ignores the requested interpolation mode.
         """
-        self.t256_face = t256_face
+        if t256_face is not None:
+            self.t256_face = t256_face
+        else:
+            self.t256_face = v2.Resize(
+                (256, 256),
+                interpolation=v2.InterpolationMode.BILINEAR,
+                antialias=False,
+            )
         self.interpolation_expression_faceeditor_back = (
             interpolation_expression_faceeditor_back
         )
@@ -100,18 +113,16 @@ class FrameEdits:
                 use_mean_eyes=use_mean_eyes,
             )
 
+            if driving_lmk_crop is None or (
+                hasattr(driving_lmk_crop, "__len__") and len(driving_lmk_crop) == 0
+            ):
+                return target
+
             interp_mode = (
                 self.interpolation_expression_faceeditor_back
                 if self.interpolation_expression_faceeditor_back is not None
                 else v2.InterpolationMode.BILINEAR
             )
-
-            if self.t256_face is None:
-                self.t256_face = v2.Resize(
-                    (256, 256),
-                    interpolation=v2.InterpolationMode.BILINEAR,
-                    antialias=False,
-                )
 
             # Warp driving face
             driving_face_512, _, _ = faceutil.warp_face_by_face_landmark_x(
@@ -147,6 +158,11 @@ class FrameEdits:
                 from_points=False,
                 use_mean_eyes=use_mean_eyes,
             )
+
+            if source_lmk is None or (
+                hasattr(source_lmk, "__len__") and len(source_lmk) == 0
+            ):
+                return target
 
             target_face_512, M_o2c, M_c2o = faceutil.warp_face_by_face_landmark_x(
                 target,
@@ -314,10 +330,9 @@ class FrameEdits:
                 )
                 lips_retarget_delta = 0
                 if flag_normalize_lip and source_lmk is not None:
-                    # Use Smoothed Ratios
-                    c_d_lip_before = [0.0]
+                    # Use measured lip ratio (computed earlier in the function)
                     combined_lip_ratio = faceutil.calc_combined_lip_ratio(
-                        c_d_lip_before, source_lmk, device=self.models_processor.device
+                        c_d_lip_lst, source_lmk, device=self.models_processor.device
                     )
                     if combined_lip_ratio[0][0] >= lip_normalize_threshold:
                         lips_retarget_delta = self.models_processor.lp_retarget_lip(
@@ -513,24 +528,24 @@ class FrameEdits:
             out = torch.squeeze(out).clamp_(0, 1)
 
             # --- PASTE BACK ---
-            t = trans.SimilarityTransform()
-            t.params[0:2] = M_c2o
             dsize = (target.shape[1], target.shape[2])
 
             out = faceutil.pad_image_by_size(out, dsize)
-            out = v2.functional.affine(
-                out,
-                t.rotation * 57.2958,  # Convert radians to degrees
-                translate=(t.translation[0], t.translation[1]),
-                scale=t.scale,
-                shear=(0.0, 0.0),
-                interpolation=v2.InterpolationMode.BILINEAR,
-                center=(0, 0),
-            )
-            out = v2.functional.crop(out, 0, 0, dsize[0], dsize[1])
+            # OPTIMIZED: Replaced scikit-image and torchvision affine with Kornia GPU direct warp.
+            M_c2o_tensor = torch.from_numpy(M_c2o).float().unsqueeze(0).to(out.device)
+            out_b = out.unsqueeze(0) if out.dim() == 3 else out
+            out = kgm.warp_affine(
+                out_b,
+                M_c2o_tensor,
+                dsize=(dsize[0], dsize[1]),
+                mode="bilinear",
+                padding_mode="zeros",
+                align_corners=True,
+            ).squeeze(0)
 
-        out = out.mul_(255.0).clamp_(0, 255).type(torch.float32)
-        return out
+            out = out.mul_(255.0).clamp_(0, 255)
+
+        return out.type(torch.float32)
 
     def swap_edit_face_core(
         self,
@@ -555,6 +570,11 @@ class FrameEdits:
         """
 
         use_mean_eyes = parameters.get("LandmarkMeanEyesToggle", False)
+        interp_mode = (
+            self.interpolation_expression_faceeditor_back
+            if self.interpolation_expression_faceeditor_back is not None
+            else v2.InterpolationMode.BILINEAR
+        )
 
         if parameters["FaceEditorEnableToggle"]:
             # 1. SETUP THE ASYNCHRONOUS CONTEXT
@@ -579,12 +599,6 @@ class FrameEdits:
                 init_source_eye_ratio = round(float(source_eye_ratio.mean()), 2)
                 init_source_lip_ratio = round(float(source_lip_ratio[0][0]), 2)
 
-                interp_mode = (
-                    self.interpolation_expression_faceeditor_back
-                    if self.interpolation_expression_faceeditor_back is not None
-                    else v2.InterpolationMode.BILINEAR
-                )
-
                 # Prepare Image
                 original_face_512, M_o2c, M_c2o = faceutil.warp_face_by_face_landmark_x(
                     img,
@@ -594,13 +608,6 @@ class FrameEdits:
                     vy_ratio=parameters["FaceEditorVYRatioDecimalSlider"],
                     interpolation=interp_mode,
                 )
-
-                if self.t256_face is None:
-                    self.t256_face = v2.Resize(
-                        (256, 256),
-                        interpolation=v2.InterpolationMode.BILINEAR,
-                        antialias=False,
-                    )
 
                 original_face_256 = self.t256_face(original_face_512)
 
@@ -774,20 +781,19 @@ class FrameEdits:
                 out = out.clamp_(0, 1)
 
             # --- POST-PROCESSING (Paste Back) ---
-            t = trans.SimilarityTransform()
-            t.params[0:2] = M_c2o
             dsize = (img.shape[1], img.shape[2])
             out = faceutil.pad_image_by_size(out, dsize)
-            out = v2.functional.affine(
-                out,
-                t.rotation * 57.2958,
-                translate=(t.translation[0], t.translation[1]),
-                scale=t.scale,
-                shear=(0.0, 0.0),
-                interpolation=interp_mode,
-                center=(0, 0),
-            )
-            out = v2.functional.crop(out, 0, 0, dsize[0], dsize[1])  # cols, rows
+            # OPTIMIZED: Replaced scikit-image and torchvision affine with Kornia GPU direct warp.
+            M_c2o_tensor = torch.from_numpy(M_c2o).float().unsqueeze(0).to(out.device)
+            out_b = out.unsqueeze(0) if out.dim() == 3 else out
+            out = kgm.warp_affine(
+                out_b,
+                M_c2o_tensor,
+                dsize=(dsize[0], dsize[1]),
+                mode="bilinear",
+                padding_mode="zeros",
+                align_corners=True,
+            ).squeeze(0)
 
             img = out
             img = img.mul_(255.0).clamp_(0, 255).type(torch.float32)
@@ -853,12 +859,10 @@ class FrameEdits:
                 original_face_512, parameters
             )
 
-            # Apply strict 1 check (kept for non-regression / future toggle)
-            if 1:
-                # Gaussian blur for soft blending of the crop mask
-                gauss = v2.GaussianBlur(kernel_size=5 * 2 + 1, sigma=(5 + 1) * 0.2)
-                out = torch.clamp(torch.div(out, 255.0), 0, 1).type(torch.float32)
-                mask_crop = gauss(self.models_processor.lp_mask_crop)
-                img = faceutil.paste_back_adv(out, M_c2o, img, mask_crop)
+            # Gaussian blur for soft blending of the crop mask
+            gauss = v2.GaussianBlur(kernel_size=5 * 2 + 1, sigma=(5 + 1) * 0.2)
+            out = torch.clamp(torch.div(out, 255.0), 0, 1).type(torch.float32)
+            mask_crop = gauss(self.models_processor.lp_mask_crop)
+            img = faceutil.paste_back_adv(out, M_c2o, img, mask_crop)
 
         return img

@@ -2,7 +2,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
-from typing import Dict
+from collections import OrderedDict
+from typing import Optional
 
 
 # Assuming Equirec2Perspec_vr and Perspec2Equirec_vr are in app.processors.external
@@ -92,7 +93,10 @@ class PerspectiveConverter:
             self.base_equirect_tensor_cxhxw_rgb_uint8.shape
         )
         self.sobel_x_kernel, self.sobel_y_kernel = _get_sobel_kernels(self.device)
-        self._blur_cache: Dict[tuple, torch.nn.Module] = {}
+        # Bounded LRU cache for GaussianBlur instances (keyed by kernel_size, sigma).
+        # A plain dict would grow unbounded across frames with varying face sizes.
+        self._blur_cache: OrderedDict[tuple, torch.nn.Module] = OrderedDict()
+        self._blur_cache_max = 32
 
     def _apply_feathering(
         self,
@@ -141,9 +145,14 @@ class PerspectiveConverter:
 
         blur_key = (kernel_size_blur, sigma)
         if blur_key not in self._blur_cache:
+            if len(self._blur_cache) >= self._blur_cache_max:
+                self._blur_cache.popitem(last=False)  # evict oldest
             self._blur_cache[blur_key] = transforms.GaussianBlur(
                 kernel_size_blur, sigma
             )
+        else:
+            # Move to end (most-recently-used) for LRU eviction ordering
+            self._blur_cache.move_to_end(blur_key)
 
         gauss = self._blur_cache[blur_key]
         feathered_mask = gauss(eroded_mask)
@@ -159,7 +168,7 @@ class PerspectiveConverter:
         theta: float,
         phi: float,
         fov: float,
-        is_left_eye: bool,
+        is_left_eye: Optional[bool],  # None = single-eye (full-frame) mode
     ):
         """
         Stitches a single processed perspective crop back into the target equirectangular image.
@@ -182,24 +191,57 @@ class PerspectiveConverter:
         )
 
         eye_region_mask = torch.zeros_like(mask_torch_original_shape, dtype=torch.bool)
-        half_width = self.orig_width // 2
-        if is_left_eye:
-            eye_region_mask[:, :, :half_width] = True
+        if is_left_eye is None:
+            # Single-eye mode: stitch covers the full frame
+            eye_region_mask[:] = True
         else:
-            eye_region_mask[:, :, half_width:] = True
+            half_width = self.orig_width // 2
+            if is_left_eye:
+                eye_region_mask[:, :, :half_width] = True
+            else:
+                eye_region_mask[:, :, half_width:] = True
 
         eye_specific_mask_torch_original_shape = (
             mask_torch_original_shape & eye_region_mask
         )
 
-        # Balanced parameters for erosion and feathering
-        feather_radius_val = 12
+        # Improvement G: scale feather_radius with face size in equirectangular space.
+        # A fixed 12px radius is too coarse for distant faces (under-feathered) and
+        # can be too aggressive for large/close faces (over-feathered).
+        _mask_h = eye_specific_mask_torch_original_shape.shape[-2]
+        _mask_w = eye_specific_mask_torch_original_shape.shape[-1]
+        # Compute the TRUE bounding-box side length of the mask region.
+        # sqrt(sum) (old approach) underestimates for sparse/irregular masks because it
+        # conflates pixel count with geometric extent.  Using nonzero() indices of the
+        # 2D mask gives the actual pixel span in the equirectangular image.
+        _mask_2d = eye_specific_mask_torch_original_shape.squeeze(0)  # H, W
+        _nonzero = _mask_2d.nonzero(as_tuple=False)  # N×2
+        if _nonzero.shape[0] > 0:
+            _y_span = int(_nonzero[:, 0].max() - _nonzero[:, 0].min()) + 1
+            _x_span = int(_nonzero[:, 1].max() - _nonzero[:, 1].min()) + 1
+            _mask_region_side = max(_y_span, _x_span)
+        else:
+            _mask_region_side = 0
+        # Dynamic feather: proportional to face size, clamped to [4, 20]
+        _mask_side_clamped = max(48, _mask_region_side)
+        feather_radius_val = max(4, min(20, _mask_side_clamped // 12))
+        if _mask_region_side < 48:
+            # Very small face — skip erosion entirely, only apply light blur
+            _erosion_k = 1
+        else:
+            _max_erosion = min(_mask_h, _mask_w) // 8
+            _erosion_k = min(2 * feather_radius_val + 1, _max_erosion)
+            _erosion_k = max(3, _erosion_k | 1)  # ensure odd and at least 3
         feathered_mask_torch_float_1hw = self._apply_feathering(
             eye_specific_mask_torch_original_shape,
             feather_radius=feather_radius_val,
             blur_sigma_factor=0.5,
-            erosion_kernel_size=(2 * feather_radius_val + 1),
+            erosion_kernel_size=_erosion_k,
         )
+
+        # VR-14: if the feathered mask is empty after erosion, skip blending entirely
+        if feathered_mask_torch_float_1hw.max() < 1e-4:
+            return
 
         # Memory-efficient blending
         # uses in-place operations to reduce peak memory usage.
@@ -220,7 +262,11 @@ class PerspectiveConverter:
         target_float.add_(component_float)
 
         # 5. Clamp and convert back to uint8, writing back to the original tensor.
-        target_equirect_torch_cxhxw_rgb_uint8[:] = target_float.clamp_(0, 255).byte()
+        # Q-BUG-02: use round_() before byte() to avoid systematic truncation bias
+        # (.byte() truncates toward zero; .round_() gives nearest integer).
+        target_equirect_torch_cxhxw_rgb_uint8[:] = (
+            target_float.clamp_(0, 255).round_().byte()
+        )
 
         del p2e_instance, equirect_component_torch, mask_torch_original_shape
         del eye_region_mask, eye_specific_mask_torch_original_shape

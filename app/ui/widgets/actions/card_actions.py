@@ -26,7 +26,7 @@ def clear_target_faces(main_window: "MainWindow", refresh_frame=True):
     main_window.selected_target_face_id = None
     # Set Parameter widget values to default
     common_widget_actions.set_widgets_values_using_face_id_parameters(
-        main_window=main_window, face_id=False
+        main_window=main_window, face_id=None
     )
     if refresh_frame:
         common_widget_actions.refresh_frame(main_window=main_window)
@@ -89,9 +89,6 @@ def find_target_faces(main_window: "MainWindow"):
             # MODIFICATION: Pass 0 for webcam rotation
             ret, frame = misc_helpers.read_frame(media_capture, 0)
             # ---
-            media_capture.set(
-                cv2.CAP_PROP_POS_FRAMES, video_processor.current_frame_number
-            )
 
         if frame is not None:
             # Frame must be in RGB format
@@ -125,7 +122,7 @@ def find_target_faces(main_window: "MainWindow"):
                 else [0, 90, 180, 270],
             )
 
-            ret = []
+            faces_list: list = []
             for face_kps in kpss_5:
                 face_emb, cropped_img = (
                     main_window.models_processor.run_recognize_direct(
@@ -135,11 +132,11 @@ def find_target_faces(main_window: "MainWindow"):
                         control["RecognitionModelSelection"],
                     )
                 )
-                ret.append([face_kps, face_emb, cropped_img, img])
+                faces_list.append([face_kps, face_emb, cropped_img, img])
 
-            if ret:
+            if faces_list:
                 # Loop through all faces in video frame
-                for face in ret:
+                for face in faces_list:
                     found = False
                     # Check if this face has already been found
                     for face_id, target_face in main_window.target_faces.items():

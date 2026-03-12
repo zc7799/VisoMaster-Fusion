@@ -1,3 +1,5 @@
+import threading
+import math
 from typing import TYPE_CHECKING, Dict, Any
 
 import torch
@@ -13,7 +15,19 @@ from app.processors.utils import faceutil
 try:
     from app.processors.external.yolox.tracker.byte_tracker import BYTETracker
 except ImportError:
-    BYTETracker = None
+    BYTETracker = None  # type: ignore[assignment,misc]
+
+
+class _BYTETRACK_ARGS:
+    """BYTETracker parameters — populated from UI control values when available."""
+
+    def __init__(self, control: dict | None = None):
+        """Initialises BYTETracker parameters from the given UI control dict."""
+        c = control or {}
+        self.track_thresh = c.get("ByteTrackTrackThreshSlider", 40) / 100.0
+        self.match_thresh = c.get("ByteTrackMatchThreshSlider", 80) / 100.0
+        self.track_buffer = int(c.get("ByteTrackTrackBufferSlider", 30))
+        self.mot20 = False
 
 
 class FaceDetectors:
@@ -32,13 +46,24 @@ class FaceDetectors:
             self.current_detector_model = None
 
     def __init__(self, models_processor: "ModelsProcessor"):
+        """
+        Initialises the FaceDetectors instance.
+
+        Args:
+            models_processor: The parent ModelsProcessor that owns this helper.
+                              Provides access to model sessions, device, and signals.
+        """
         self.models_processor = models_processor
         self.center_cache: Dict[tuple, np.ndarray] = {}
         self.current_detector_model = None
 
         # Tracking State
         self.tracker = None
-        self.track_history = {}  # {track_id: {'cum_score': float, 'last_seen': int}}
+        self.track_history: dict = {}  # {track_id: {'cum_score': float, 'last_seen': int}}
+        self._track_history_lock = threading.Lock()
+        # BT-06/BT-07: dedicated lock for BYTETracker instance and frame_id to prevent
+        # concurrent workers from corrupting Kalman filter state
+        self._tracker_lock = threading.Lock()
         self.lambda_s = 0.3  # Smoothing factor for cumulative scores
 
         # This map links a detector name (from the UI) to its model file and processing function.
@@ -56,8 +81,9 @@ class FaceDetectors:
         self, img: torch.Tensor, input_size: tuple, normalization_mode: str
     ) -> tuple[torch.Tensor, torch.Tensor, tuple]:
         """
-        Prepares an image for a face detection model by resizing, padding, and handling color space.
-        Normalization and dtype conversion for Yolo/Yunet are deferred to their respective functions.
+        OPTIMIZED: Prepares an image for a face detection model by resizing and padding.
+        Replaced explicit canvas creation, slicing, and permutations with native PyTorch padding
+        to eliminate memory fragmentation and speed up VRAM operations.
         """
         if not isinstance(input_size, tuple):
             input_size = (input_size, input_size)
@@ -77,49 +103,103 @@ class FaceDetectors:
         # Use float for det_scale calculation initially for precision
         det_scale = torch.tensor(
             new_height / float(img_height), device=self.models_processor.device
-        )  # Ensure float division
+        )
+
         resize = v2.Resize((new_height, new_width), antialias=True)
         resized_img = resize(img)
 
-        # Create a blank canvas with the model's required dtype and paste the resized image.
-        # Yolo and Yunet start with uint8 here. RetinaFace/SCRFD use float32.
+        # --- OPTIMIZATION: Native Zero-Copy Padding ---
+        # Calculate needed padding on the right and bottom
+        pad_right = input_size[0] - new_width
+        pad_bottom = input_size[1] - new_height
+
+        # Determine target dtype
         canvas_dtype = (
             torch.float32
             if normalization_mode in ["retinaface", "scrfd"]
             else torch.uint8
         )
-        det_img_canvas = torch.zeros(
-            (input_size[1], input_size[0], 3),
-            dtype=canvas_dtype,
-            device=self.models_processor.device,
-        )
-        # Ensure resized_img is compatible with canvas dtype before assignment
+
+        # Cast BEFORE padding to avoid casting the newly padded pixels (saves VRAM bandwidth)
         if canvas_dtype == torch.uint8 and resized_img.dtype != torch.uint8:
             # Assuming resized_img might be float [0, 255] after resize
-            resized_img_casted = resized_img.byte()
+            resized_img_casted = resized_img.clamp(0, 255).byte()
         elif canvas_dtype == torch.float32 and resized_img.dtype == torch.uint8:
-            resized_img_casted = resized_img.float()  # Keep range [0, 255] for now
+            resized_img_casted = resized_img.float()
         else:
             resized_img_casted = resized_img
 
-        det_img_canvas[:new_height, :new_width, :] = resized_img_casted.permute(1, 2, 0)
+        # Native PyTorch Pad: applies (left, right, top, bottom) to the last 2 dimensions (H, W)
+        det_img = torch.nn.functional.pad(
+            resized_img_casted, (0, pad_right, 0, pad_bottom), mode="constant", value=0
+        )
 
         # Apply model-specific color space.
         if normalization_mode == "yunet":
-            det_img_canvas = det_img_canvas[:, :, [2, 1, 0]]  # RGB to BGR for Yunet
-
-        det_img = det_img_canvas.permute(2, 0, 1)  # Back to CHW format
+            # RGB to BGR natively without permutations
+            det_img = det_img[[2, 1, 0], :, :]
 
         # Apply normalization ONLY for RetinaFace/SCRFD here.
         if normalization_mode in ["retinaface", "scrfd"]:
-            # If canvas was uint8 initially (unlikely here but safe check)
-            if det_img.dtype == torch.uint8:
-                det_img = det_img.float()
             det_img = (det_img - 127.5) / 128.0  # Normalize to [-1.0, 1.0] range
 
-        # For Yolo/Yunet, det_img remains uint8 [0, 255] at this stage.
-
         return det_img, det_scale, input_size
+
+    def _infer_fixed_square_input_from_outputs(
+        self, ort_session, first_stride: int = 8
+    ) -> int | None:
+        """
+        Attempts to infer a fixed square model input size from the first detection head
+        output shape. For RetinaFace/SCRFD this head typically has shape {N,1} where
+        N = (input/stride)^2 * num_anchors and num_anchors is usually 2.
+        """
+        try:
+            outputs = ort_session.get_outputs()
+            if not outputs:
+                return None
+
+            shape = outputs[0].shape
+            if not shape or len(shape) < 1:
+                return None
+
+            n = shape[0]
+            if not isinstance(n, int) or n <= 0:
+                return None
+
+            # Try common anchor counts used by RetinaFace/SCRFD exports.
+            for anchors in (2, 1):
+                if n % anchors != 0:
+                    continue
+                cells = n // anchors
+                side = int(round(math.sqrt(cells)))
+                if side > 0 and side * side == cells:
+                    return side * first_stride
+        except Exception:
+            return None
+
+        return None
+
+    def _resolve_detector_input_size(
+        self, detect_mode: str, requested_input_size: tuple, ort_session
+    ) -> tuple:
+        """
+        Resolves the effective detection input size.
+        For fixed-shape RetinaFace/SCRFD exports, running at a mismatched size can spam
+        ONNX Runtime VerifyOutputSizes warnings. If a fixed square size is detectable,
+        prefer it over the requested value.
+        """
+        if detect_mode not in ("RetinaFace", "SCRFD"):
+            return requested_input_size
+
+        inferred_size = self._infer_fixed_square_input_from_outputs(ort_session)
+        if inferred_size is None:
+            return requested_input_size
+
+        requested_w, requested_h = requested_input_size
+        if requested_w == inferred_size and requested_h == inferred_size:
+            return requested_input_size
+
+        return (inferred_size, inferred_size)
 
     def _filter_detections_gpu(
         self,
@@ -244,6 +324,9 @@ class FaceDetectors:
                 bindex = torch.arange(
                     det_boxes.shape[0], device=self.models_processor.device
                 )[:max_num]
+                det_boxes = det_boxes[bindex]
+                det_kpss = det_kpss[bindex]
+                det_scores = det_scores[bindex]
 
         # Transfer final results back to CPU and scale them to the original image dimensions.
         det_scale_val = det_scale.cpu().item()
@@ -302,7 +385,7 @@ class FaceDetectors:
                 ):
                     kpss_5[i] = landmark_kpss_5
             kpss = np.array(refined_kpss, dtype=object)
-        return det, kpss_5, kpss
+        return det, kpss_5, kpss, score_values
 
     def _run_model_with_lazy_build_check(
         self, model_name: str, ort_session, io_binding
@@ -424,8 +507,9 @@ class FaceDetectors:
                 tracked_kpss.append(
                     kpss_5
                 )  # We keep the 5-points format for consistency
-                # For score, we reuse the previous one or a default, as landmarks don't always give a bbox score
-                tracked_scores.append(prev_face.get("score", 0.99))
+                # BT-14: use a conservative fallback score (0.5) rather than 0.99,
+                # so secondary landmark models can improve the result when confidence is uncertain
+                tracked_scores.append(prev_face.get("score", 0.5))
             else:
                 return None, None, None
 
@@ -448,6 +532,7 @@ class FaceDetectors:
         from_points=False,
         rotation_angles=None,
         previous_detections=None,
+        bypass_bytetrack=False,
         **kwargs,
     ):
         """
@@ -456,6 +541,59 @@ class FaceDetectors:
         """
         control = self.models_processor.main_window.control
         use_bytetrack = control.get("FaceTrackingEnableToggle", False)
+        # bypass_bytetrack=True disables ByteTrack for this call only (e.g. per-eye VR
+        # detection where the half-width coordinate space would corrupt tracker state)
+        if bypass_bytetrack:
+            use_bytetrack = False
+
+        # ByteTrack skip-frame shortcut: when ByteTrack is active, the tracker has been
+        # initialised, AND this is a detection-interval skip frame (indicated by non-empty
+        # previous_detections), advance the Kalman filter with empty detections rather than
+        # running the full detector.  This makes FaceDetectionIntervalSlider effective even
+        # when ByteTrack is enabled (previously the slider was silently ignored).
+        if (
+            use_bytetrack
+            and BYTETracker is not None
+            and previous_detections is not None
+            and len(previous_detections) > 0
+        ):
+            with self._tracker_lock:
+                if self.tracker is not None:
+                    img_hw = (int(img.shape[1]), int(img.shape[2]))
+                    online_targets = self.tracker.update(
+                        np.empty((0, 5)), img_hw, img_hw
+                    )
+                else:
+                    online_targets = []
+
+            # Build return arrays from coasted tracks (Kalman-predicted positions
+            # with last known landmarks) — same logic as the main ByteTrack path below
+            tracked_det: list = []
+            tracked_kpss_5: list = []
+            tracked_kpss_all: list = []
+            tracked_scores: list = []
+            for t in online_targets:
+                tlwh = t.tlwh
+                tid = t.track_id
+                t_bbox = np.array(
+                    [tlwh[0], tlwh[1], tlwh[0] + tlwh[2], tlwh[1] + tlwh[3]]
+                )
+                with self._track_history_lock:
+                    hist = self.track_history.get(tid)
+                if hist is not None and hist.get("kps") is not None:
+                    tracked_det.append(t_bbox)
+                    tracked_kpss_5.append(hist["kps"])
+                    tracked_kpss_all.append(hist["kps"])
+                    tracked_scores.append(hist["cum_score"])
+
+            if tracked_det:
+                return (
+                    np.array(tracked_det, dtype=np.float32),
+                    np.array(tracked_kpss_5, dtype=np.float32),
+                    np.array(tracked_kpss_all, dtype=object),
+                )
+            # Tracker had no active tracks (e.g. first ever frame) → fall through to full detection
+            # so the user sees faces immediately rather than waiting one extra frame.
 
         # TRACKING ATTEMPT (Simple Fallback)
         # If we have previous faces and tracking is requested (via implicit logic or kwargs)
@@ -478,7 +616,7 @@ class FaceDetectors:
             if t_det is not None:
                 # Optionally refine landmarks (if the user wants detailed landmarks)
                 if use_landmark_detection:
-                    return self._refine_landmarks(
+                    det_r, kpss_5_r, kpss_r, _ = self._refine_landmarks(
                         img,
                         t_det,
                         t_kpss,
@@ -489,36 +627,39 @@ class FaceDetectors:
                         from_points,
                         **kwargs,
                     )
+                    return det_r, kpss_5_r, kpss_r
                 return t_det, t_kpss, t_scores
 
         # FULL DETECTION FALLBACK
         # If no previous detections or tracking failed, run the heavy model
         detector = self.detector_map.get(detect_mode)
         if not detector:
-            return [], [], []
+            return np.empty((0, 4)), np.empty((0, 5, 2)), np.empty((0, 5, 2))
 
         model_name = detector["model_name"]
         if self.current_detector_model and self.current_detector_model != model_name:
             self.models_processor.unload_model(self.current_detector_model)
         self.current_detector_model = model_name
 
-        if not self.models_processor.models.get(model_name):
-            self.models_processor.models[model_name] = self.models_processor.load_model(
-                model_name
-            )
-
-        ort_session = self.models_processor.models.get(model_name)
+        ort_session = self.models_processor.load_model(model_name)
         if not ort_session:
             print(
                 f"[ERROR] {model_name} model failed to load or is not available. Skipping detection."
             )
-            return [], [], []
+            return np.empty((0, 4)), np.empty((0, 5, 2)), np.empty((0, 5, 2))
 
         detection_function = detector["function"]
 
-        # Strategy: Use a lower detection threshold if ByteTrack is enabled to increase recall.
-        # The tracker will then filter out non-persistent false positives.
-        effective_score = 0.3 if use_bytetrack else score
+        # BT-05: when ByteTrack is enabled use a recall-optimised threshold that
+        # respects the user's DetectorScoreSlider (capped at 0.5 so low-confidence
+        # detections still reach the tracker's second-association pass).
+        # Previously this was always hardcoded to 0.3, ignoring user intent and
+        # falling below ByteTracker's own track_thresh (0.4), causing excess FP tracks.
+        if use_bytetrack:
+            user_score = control.get("DetectorScoreSlider", 50) / 100.0
+            effective_score = min(user_score, 0.5)
+        else:
+            effective_score = score
 
         args = {
             "img": img,
@@ -536,39 +677,66 @@ class FaceDetectors:
         if detect_mode in ["RetinaFace", "SCRFD"]:
             args["input_size"] = input_size
 
-        # Run the detector
-        det, kpss_5, kpss = detection_function(**args)
+        # Run the detector — returns (det, kpss_5, kpss, det_scores)
+        det, kpss_5, kpss, det_scores = detection_function(**args)
+
+        # BT-02: guarantee det_scores is always a 1-D array so downstream boolean
+        # indexing and math operations behave consistently (some detectors return (N,1))
+        if hasattr(det_scores, "flatten"):
+            det_scores = det_scores.flatten()
+
+        # Initialize score_values so it is always bound before the ByteTrack block
+        # (det_scores from detection_function may not be assigned in all paths).
+        score_values = np.array([])
 
         # ByteTrack Advanced Tracking
-        if use_bytetrack:
-            from app.processors.external.yolox.tracker.byte_tracker import BYTETracker
+        if use_bytetrack and BYTETracker is not None:
+            # BT-06/BT-07: serialize all tracker access under a dedicated lock to
+            # prevent concurrent pool workers from corrupting Kalman filter state
+            with self._tracker_lock:
+                if self.tracker is None:
+                    self.tracker = BYTETracker(_BYTETRACK_ARGS(control))
 
-            if self.tracker is None:
-                # Initialize ByteTrack default parameters
-                class TrackerArgs:
-                    track_thresh = 0.4
-                    track_buffer = 30
-                    match_thresh = 0.8
-                    mot20 = False
+                # Prepare detections for ByteTrack [x1, y1, x2, y2, score]
+                img_hw = (int(img.shape[1]), int(img.shape[2]))
+                # BT-13: measure active tracks BEFORE update so we have the correct
+                # pre-update baseline for scene-cut detection (measuring after update
+                # inflates the count by newly confirmed tracks, making cuts harder to detect)
+                active_before = len(self.tracker.tracked_stracks)
+                if len(det) > 0:
+                    # Use actual detection scores; fall back to 0.9 if lengths mismatch
+                    scores_for_tracker = (
+                        det_scores
+                        if len(det_scores) == len(det)
+                        else np.full(len(det), 0.9)
+                    )
+                    tracker_input = np.column_stack([det, scores_for_tracker])
+                    online_targets = self.tracker.update(tracker_input, img_hw, img_hw)
+                else:
+                    online_targets = self.tracker.update(
+                        np.empty((0, 5)), img_hw, img_hw
+                    )
 
-                self.tracker = BYTETracker(TrackerArgs())
-
-            # Prepare detections for ByteTrack [x1, y1, x2, y2, score]
-            if len(det) > 0:
-                # Detector already filtered by effective_score; use high dummy for persistence
-                tracker_input = np.column_stack([det, np.full(len(det), 0.9)])
-                online_targets = self.tracker.update(
-                    tracker_input, img.shape[1:3], img.shape[1:3]
-                )
-            else:
-                online_targets = self.tracker.update(
-                    np.empty((0, 5)), img.shape[1:3], img.shape[1:3]
-                )
+                # BT-13: scene-cut detection — if fewer than 30% of active tracks matched,
+                # the scene has likely changed; reset the tracker to avoid stale Kalman state
+                matched_count = len(online_targets)
+                if active_before > 0 and matched_count / active_before < 0.3:
+                    # print("[ByteTrack] Scene cut detected — resetting tracker")
+                    self.tracker = (
+                        None  # will be re-created with frame_id=0 on next call
+                    )
+                    with self._track_history_lock:
+                        self.track_history.clear()
+                    online_targets = []
 
             tracked_det = []
             tracked_kpss_5 = []
             tracked_kpss_all = []
             tracked_scores = []
+
+            current_frame_num = getattr(
+                self.models_processor, "current_frame_number", 0
+            )
 
             for t in online_targets:
                 tlwh = t.tlwh
@@ -582,33 +750,56 @@ class FaceDetectors:
                 best_iou = 0
                 match_idx = -1
                 for i, d in enumerate(det):
-                    xA, yA = max(t_bbox[0], d[0]), max(t_bbox[1], d[1])
-                    xB, yB = min(t_bbox[2], d[2]), min(t_bbox[3], d[3])
-                    interArea = max(0, xB - xA) * max(0, yB - yA)
-                    if interArea > 0:
-                        bAArea = (t_bbox[2] - t_bbox[0]) * (t_bbox[3] - t_bbox[1])
-                        bBArea = (d[2] - d[0]) * (d[3] - d[1])
-                        iou = interArea / float(bAArea + bBArea - interArea)
-                        if iou > best_iou:
-                            best_iou = iou
-                            match_idx = i
+                    iou = self._calculate_iou(t_bbox, d)
+                    if iou > best_iou:
+                        best_iou = iou
+                        match_idx = i
 
                 if match_idx != -1:
                     # Update Cumulative Similarity Score for UI stability
-                    if tid in self.track_history:
-                        prev_score = self.track_history[tid]["cum_score"]
-                        cum_score = (
-                            self.lambda_s * t.score + (1 - self.lambda_s) * prev_score
-                        )
-                    else:
-                        cum_score = t.score
-
-                    self.track_history[tid] = {"cum_score": cum_score}
+                    with self._track_history_lock:
+                        if tid in self.track_history:
+                            prev_score = self.track_history[tid]["cum_score"]
+                            cum_score = (
+                                self.lambda_s * t.score
+                                + (1 - self.lambda_s) * prev_score
+                            )
+                        else:
+                            cum_score = t.score
+                        # BT-08: record last_seen so stale entries can be evicted
+                        self.track_history[tid] = {
+                            "cum_score": cum_score,
+                            "last_seen": current_frame_num,
+                            "kps": kpss_5[match_idx],
+                        }
 
                     tracked_det.append(t_bbox)
                     tracked_kpss_5.append(kpss_5[match_idx])
                     tracked_kpss_all.append(kpss[match_idx])
                     tracked_scores.append(cum_score)
+                else:
+                    # BT-04: coasted track — no matching raw detection; use Kalman-predicted
+                    # position with last known landmarks so brief occlusions are handled
+                    with self._track_history_lock:
+                        hist = self.track_history.get(tid)
+                    if hist is not None and hist.get("kps") is not None:
+                        last_kps = hist["kps"]
+                        tracked_det.append(t_bbox)
+                        tracked_kpss_5.append(last_kps)
+                        # No dense landmarks available for coasted tracks; reuse 5-pt kps
+                        tracked_kpss_all.append(last_kps)
+                        tracked_scores.append(hist["cum_score"])
+
+            # BT-08: evict stale track_history entries (last seen > track_buffer frames ago)
+            track_buffer = int(control.get("ByteTrackTrackBufferSlider", 30))
+            with self._track_history_lock:
+                stale_ids = [
+                    tid
+                    for tid, data in self.track_history.items()
+                    if current_frame_num - data.get("last_seen", 0) > track_buffer
+                ]
+                for tid in stale_ids:
+                    del self.track_history[tid]
 
             # Ensure numerical types for math operations
             if tracked_det:
@@ -619,19 +810,30 @@ class FaceDetectors:
                 kpss = np.array(tracked_kpss_all, dtype=object)
                 score_values = np.array(tracked_scores, dtype=np.float32).flatten()
             else:
-                det, kpss_5, kpss, score_values = (
-                    np.empty((0, 4)),
-                    np.empty((0, 5, 2)),
-                    [],
-                    np.array([]),
-                )
+                # BT-12 / BT-14: no confirmed tracks yet (first frame, scene cut, or
+                # tracker reset after seek).  Fall back to raw detector output so that
+                # swap/edit is applied immediately instead of waiting for ByteTrack to
+                # confirm tracks on a subsequent frame.
+                if len(det) > 0:
+                    score_values = (
+                        det_scores
+                        if len(det_scores) == len(det)
+                        else np.full(len(det), 0.9, dtype=np.float32)
+                    )
+                    # det, kpss_5, kpss already hold the raw detector output — keep them
+                else:
+                    det = np.empty((0, 4), dtype=np.float32)
+                    kpss_5 = np.empty((0, 5, 2), dtype=np.float32)
+                    kpss = np.empty((0,), dtype=object)
+                    score_values = np.empty((0,), dtype=np.float32)
 
         # Optionally refine landmarks (if the user wants detailed landmarks)
+        bytetrack_active = use_bytetrack and BYTETracker is not None
         if use_landmark_detection and len(det) > 0:
-            # If we just tracked, use current track scores, otherwise use detector scores
-            current_scores = score_values if use_bytetrack else np.full(len(det), 0.9)
+            # Use tracked scores when ByteTrack is active, otherwise actual detector scores
+            current_scores = score_values if bytetrack_active else det_scores
 
-            return self._refine_landmarks(
+            det_r, kpss_5_r, kpss_r, _ = self._refine_landmarks(
                 img,
                 det,
                 kpss_5,
@@ -642,10 +844,38 @@ class FaceDetectors:
                 from_points,
                 **kwargs,
             )
+            return det_r, kpss_5_r, kpss_r
 
         return det, kpss_5, kpss
 
+    def reset_tracker(self):
+        """Reset the ByteTracker and its history (call on video seek or toggle to discard stale state)."""
+        with self._tracker_lock:
+            self.tracker = None
+        with self._track_history_lock:
+            self.track_history.clear()
+        # Reset the global track-ID counter so new sessions start from ID 1
+        try:
+            from app.processors.external.yolox.tracker.basetrack import BaseTrack
+
+            BaseTrack._count = 0
+        except ImportError:
+            pass
+
     def _calculate_iou(self, boxA, boxB):
+        """
+        Computes the Intersection-over-Union (IoU) between two axis-aligned bounding boxes.
+
+        Args:
+            boxA: Sequence [x1, y1, x2, y2] for the first box.
+            boxB: Sequence [x1, y1, x2, y2] for the second box.
+
+        Returns:
+            float: IoU in [0, 1]. Returns 0.0 when either box has zero area
+                   (BT-01: guards against degenerate Kalman predictions).
+        """
+        # BT-01: guard against division by zero when Kalman prediction produces
+        # a degenerate (zero-area) bounding box
         xA = max(boxA[0], boxB[0])
         yA = max(boxA[1], boxB[1])
         xB = min(boxA[2], boxB[2])
@@ -653,7 +883,10 @@ class FaceDetectors:
         interArea = max(0, xB - xA) * max(0, yB - yA)
         boxAArea = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
         boxBArea = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
-        return interArea / float(boxAArea + boxBArea - interArea)
+        denominator = float(boxAArea + boxBArea - interArea)
+        if denominator <= 0:
+            return 0.0
+        return interArea / denominator
 
     def detect_retinaface(self, **kwargs):
         """Runs the RetinaFace detection pipeline."""
@@ -678,7 +911,9 @@ class FaceDetectors:
 
         for angle in rotation_angles:
             if angle != 0:
-                aimg, M = faceutil.transform(det_img, (cx, cy), 640, 1.0, angle)
+                aimg, M = faceutil.transform(
+                    det_img, (cx, cy), max(final_input_size), 1.0, angle
+                )
                 IM = faceutil.invertAffineTransform(M)
                 aimg = torch.unsqueeze(aimg, 0).contiguous()
             else:
@@ -822,7 +1057,12 @@ class FaceDetectors:
             kwargs.get("max_num"),
         )
         if det is None:
-            return [], [], []
+            return (
+                np.empty((0, 4)),
+                np.empty((0, 5, 2)),
+                np.empty((0, 5, 2)),
+                np.empty((0,)),
+            )
 
         # Optionally refine landmarks with a secondary model
         return self._refine_landmarks(img_landmark, det, kpss, score_values, **kwargs)
@@ -852,7 +1092,9 @@ class FaceDetectors:
 
         for angle in rotation_angles:
             if angle != 0:
-                aimg, M = faceutil.transform(det_img, (cx, cy), 640, 1.0, angle)
+                aimg, M = faceutil.transform(
+                    det_img, (cx, cy), max(final_input_size), 1.0, angle
+                )
                 IM = faceutil.invertAffineTransform(M)
                 aimg = torch.unsqueeze(aimg, 0).contiguous()
             else:
@@ -995,7 +1237,12 @@ class FaceDetectors:
             kwargs.get("max_num"),
         )
         if det is None:
-            return [], [], []
+            return (
+                np.empty((0, 4)),
+                np.empty((0, 5, 2)),
+                np.empty((0, 5, 2)),
+                np.empty((0,)),
+            )
 
         # Optionally refine landmarks with a secondary model
         return self._refine_landmarks(img_landmark, det, kpss, score_values, **kwargs)
@@ -1158,7 +1405,12 @@ class FaceDetectors:
             kwargs.get("max_num"),
         )
         if det is None:
-            return [], [], []
+            return (
+                np.empty((0, 4)),
+                np.empty((0, 5, 2)),
+                np.empty((0, 5, 2)),
+                np.empty((0,)),
+            )
 
         return self._refine_landmarks(img_landmark, det, kpss, score_values, **kwargs)
 
@@ -1259,7 +1511,7 @@ class FaceDetectors:
                 bbox_cxy = (
                     reg_pred[pos_inds, :2] * stride + anchor_centers[pos_inds, :]
                 )  # Filter anchor_centers too
-                bbox_wh = np.exp(reg_pred[pos_inds, 2:]) * stride
+                bbox_wh = np.exp(np.clip(reg_pred[pos_inds, 2:], -10.0, 10.0)) * stride
 
                 bboxes = np.stack(
                     [
@@ -1367,6 +1619,11 @@ class FaceDetectors:
             kwargs.get("max_num"),
         )
         if det is None:
-            return [], [], []
+            return (
+                np.empty((0, 4)),
+                np.empty((0, 5, 2)),
+                np.empty((0, 5, 2)),
+                np.empty((0,)),
+            )
 
         return self._refine_landmarks(img_landmark, det, kpss, score_values, **kwargs)
