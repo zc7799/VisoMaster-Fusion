@@ -5,6 +5,7 @@ if TYPE_CHECKING:
     from app.ui.main_ui import MainWindow
 
 
+# ==================== CN功能修改开始：时间格式化函数 ====================
 def format_time(frame_number, fps):
     """Format frame number to time string (MM:SS)."""
     if fps <= 0:
@@ -106,3 +107,5 @@ def fit_image_to_view(
     graphicsViewFrame.setSceneRect(scene_rect)
     # Fit the image to the view, keeping the aspect ratio
     graphicsViewFrame.fitInView(pixmap_item, QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+
+# ==================== CN功能修改结束：时间格式化函数 ====================

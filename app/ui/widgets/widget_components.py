@@ -1,4 +1,5 @@
 # pylint: disable=keyword-arg-before-vararg
+# CN功能修改：添加了FindFaceDialog、LoadLastWorkspaceDialog等组件
 import os
 import traceback
 from functools import partial
@@ -1395,6 +1396,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
     pass
 
 
+# ==================== CN功能修改开始：加载上次工作区对话框 ====================
 class LoadLastWorkspaceDialog(QtWidgets.QDialog):
     def __init__(
         self,
@@ -1444,6 +1446,8 @@ class LoadLastWorkspaceDialog(QtWidgets.QDialog):
         self.timer.stop()
         self.accept()
         save_load_actions.load_saved_workspace(self.main_window, "last_workspace.json")
+
+# ==================== CN功能修改结束：加载上次工作区对话框 ====================
 
 
 class JobLoadingDialog(QtWidgets.QDialog):
@@ -1542,6 +1546,7 @@ class SaveJobDialog(QtWidgets.QDialog):
         return None  # Return None if checkbox is checked
 
 
+# ==================== CN功能修改开始：查找人脸对话框 ====================
 class FindFaceDialog(QtWidgets.QDialog):
     def __init__(self, main_window: "MainWindow", parent_path: str):
         super().__init__(main_window)
@@ -1640,6 +1645,8 @@ class FindFaceDialog(QtWidgets.QDialog):
         """选择文件夹并关闭对话框"""
         self.selected_folder = os.path.join(self.parent_path, item.text())
         self.accept()
+
+# ==================== CN功能修改结束：查找人脸对话框 ====================
 
 
 class ParametersWidget:

@@ -53,6 +53,7 @@ def filter_input_faces(main_window: "MainWindow", search_text: str = ""):
     worker.start()
 
 
+# ==================== CN功能修改开始：全选输入人脸功能 ====================
 def select_all_input_faces(main_window: "MainWindow"):
     """全选输入人脸列表中的所有项目"""
     if not main_window.cur_selected_target_face_button:
@@ -71,6 +72,8 @@ def select_all_input_faces(main_window: "MainWindow"):
     cur_selected_target_face_button.calculate_assigned_input_embedding()
     from app.ui.widgets.actions import common_actions as common_widget_actions
     common_widget_actions.refresh_frame(main_window)
+
+# ==================== CN功能修改结束：全选输入人脸功能 ====================
 
 
 def filter_merged_embeddings(main_window: "MainWindow", search_text: str = ""):

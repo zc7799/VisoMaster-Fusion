@@ -521,6 +521,7 @@ def show_presets(main_window: "MainWindow"):
     )
 
 
+# ==================== CN功能修改开始：查找人脸对话框功能 ====================
 @QtCore.Slot()
 def show_find_face_dialog(main_window: "MainWindow"):
     """显示查找人脸对话框"""
@@ -551,3 +552,5 @@ def show_find_face_dialog(main_window: "MainWindow"):
     if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
         if dialog.selected_folder:
             select_input_face_images(main_window, source_type="folder", folder_name=dialog.selected_folder, skip_dialog=True)
+
+# ==================== CN功能修改结束：查找人脸对话框功能 ====================
