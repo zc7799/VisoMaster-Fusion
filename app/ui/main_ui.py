@@ -66,8 +66,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     display_messagebox_signal = QtCore.Signal(str, str, QtWidgets.QWidget)
 
     def initialize_variables(self):
-        self.video_loader_worker: ui_workers.TargetMediaLoaderWorker | bool = False
-        self.input_faces_loader_worker: ui_workers.InputFacesLoaderWorker | bool = False
+        self.video_loader_worker: ui_workers.TargetMediaLoaderWorker | None = None
+        self.input_faces_loader_worker: ui_workers.InputFacesLoaderWorker | None = None
         self.target_videos_filter_worker = ui_workers.FilterWorker(
             main_window=self, search_text="", filter_list="target_videos"
         )
