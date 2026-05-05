@@ -1230,9 +1230,7 @@ def test_resolve_output_folder_preserves_source_directory_structure(video_action
         main_window, "E:/targets/set_a/sub_01/image_1.png"
     )
 
-    assert os.path.normpath(output_folder) == os.path.normpath(
-        "E:/output/set_a/sub_01"
-    )
+    assert os.path.normpath(output_folder) == os.path.normpath("E:/output/set_a/sub_01")
 
 
 def test_resolve_output_folder_preserve_and_cluster(video_actions_env):
@@ -1278,7 +1276,9 @@ def test_resolve_output_folder_target_location_overrides_preserve(video_actions_
         main_window, "E:/targets/set_a/sub_01/image_1.png"
     )
 
-    assert os.path.normpath(output_folder) == os.path.normpath("E:/targets/set_a/sub_01")
+    assert os.path.normpath(output_folder) == os.path.normpath(
+        "E:/targets/set_a/sub_01"
+    )
 
 
 def _make_batch_main_window(*widgets):

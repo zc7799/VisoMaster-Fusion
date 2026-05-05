@@ -34,7 +34,9 @@ def _get_selected_embedding_name(main_window: "MainWindow") -> str:
         if target_face_button
         else None
     )
-    embedding_id = next(iter(assigned_embeddings), None) if assigned_embeddings else None
+    embedding_id = (
+        next(iter(assigned_embeddings), None) if assigned_embeddings else None
+    )
     embedding_button = (
         main_window.merged_embeddings.get(embedding_id)
         if embedding_id is not None
@@ -53,7 +55,9 @@ def _get_target_media_root(main_window: "MainWindow") -> str:
         root = str(target_path_line_edit.text() or "").strip()
         if root:
             return os.path.abspath(root)
-    fallback = str(getattr(main_window, "last_target_media_folder_path", "") or "").strip()
+    fallback = str(
+        getattr(main_window, "last_target_media_folder_path", "") or ""
+    ).strip()
     return os.path.abspath(fallback) if fallback else ""
 
 

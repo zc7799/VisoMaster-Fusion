@@ -1808,12 +1808,18 @@ class ModelsProcessor(QtCore.QObject):
         kv_tensor_map_for_this_run: Dict[str, Dict[str, torch.Tensor]] | None = None
         if reference_kv_map:
             try:
+                # The cache from ref_ldm_kv_embedding.py is already on GPU and
+                # immutable from this code path's perspective (ORT reads the
+                # bound buffers, never writes). The previous .clone().to(device)
+                # round was meaningful only when the cache lived on CPU — it
+                # forced a PCIe upload. With the cache on GPU, .to() was a no-op
+                # but .clone() still allocated a fresh GPU buffer per layer per
+                # UNet step (32 layers × 20-50 DDIM steps × 8 workers — many GB
+                # of GPU memory churn per frame). Bind the cached tensors
+                # directly; if a future code path needs to mutate them, that
+                # path should clone locally instead of paying the cost here.
                 kv_tensor_map_for_this_run = {
-                    layer: {
-                        # OPTIMISATION PCIe : non_blocking=True for async
-                        "k": tens_dict["k"].clone().to(self.device, non_blocking=True),
-                        "v": tens_dict["v"].clone().to(self.device, non_blocking=True),
-                    }
+                    layer: {"k": tens_dict["k"], "v": tens_dict["v"]}
                     for layer, tens_dict in reference_kv_map.items()
                     if tens_dict
                     and isinstance(tens_dict.get("k"), torch.Tensor)

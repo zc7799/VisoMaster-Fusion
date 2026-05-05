@@ -20,6 +20,7 @@ This shim resolves the repo root from its own `__file__`, prepends it to
 of cwd. Portable installers and post-install steps should call this file by
 absolute path rather than the `-m` form.
 """
+
 import sys
 from pathlib import Path
 

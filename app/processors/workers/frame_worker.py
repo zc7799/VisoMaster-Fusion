@@ -238,8 +238,16 @@ class FrameWorker(threading.Thread):
         ).view(1, 1, 3, 3)
         self.kernel_sobel_y = self.kernel_sobel_x.transpose(2, 3)
 
-        # Thread-safety. Create a frame_worker stream as cpu uses multithreaded streams but GPU makes a queue.
-        self.worker_stream = None  # torch.cuda.Stream() if self.models_processor.device == "cuda" else None
+        # FW-CPU-1: Per-worker CUDA stream, otherwise all 8 pool workers share the
+        # default stream and every `current_stream().synchronize()` call inside
+        # _run_model_with_lazy_build_check (face_swappers / face_masks / face_restorers /
+        # frame_enhancers / face_landmark_detectors) waits for *every* worker's
+        # pending GPU work. With CUDA 13's spin-wait scheduler that turns each pool
+        # worker into a 100%-CPU spinner; pinning each worker to its own stream
+        # cuts the sync surface back down to what the worker itself submitted.
+        self.worker_stream = (
+            torch.cuda.Stream() if self.models_processor.device == "cuda" else None
+        )
 
     def set_scaling_transforms(self, control_params):
         """Initializes the torchvision transforms based on user interpolation settings."""

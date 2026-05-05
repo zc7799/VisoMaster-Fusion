@@ -1232,7 +1232,9 @@ def _serialize_job_data(main_window: "MainWindow") -> dict:
         },
         "job_marker_pairs": copy.deepcopy(main_window.job_marker_pairs),
         "selected_media_id": selected_media_id,
-        "selected_target_face_id": getattr(main_window, "selected_target_face_id", None),
+        "selected_target_face_id": getattr(
+            main_window, "selected_target_face_id", None
+        ),
         "swap_faces_enabled": main_window.swapfacesButton.isChecked(),
         "edit_faces_enabled": main_window.editFacesButton.isChecked(),
         "last_target_media_folder_path": main_window.last_target_media_folder_path,
@@ -1960,7 +1962,9 @@ class JobProcessor(QThread):
     @staticmethod
     def _embedding_signature(embedding_data: dict[str, Any]) -> str:
         """Build a stable signature so equivalent embeddings across jobs are loaded once."""
-        embedding_name = embedding_data.get("embedding_name", embedding_data.get("name", ""))
+        embedding_name = embedding_data.get(
+            "embedding_name", embedding_data.get("name", "")
+        )
         embedding_store = embedding_data.get("embedding_store", {})
         payload = {
             "embedding_name": embedding_name,

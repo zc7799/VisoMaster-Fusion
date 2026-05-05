@@ -768,7 +768,10 @@ def load_saved_workspace(
                     first_face_button.setChecked(True)
                     main_window.cur_selected_target_face_button = first_face_button
 
-                    for target_face_id, target_face_button in main_window.target_faces.items():
+                    for (
+                        target_face_id,
+                        target_face_button,
+                    ) in main_window.target_faces.items():
                         if target_face_id != first_face_id:
                             target_face_button.setChecked(False)
 
@@ -780,7 +783,9 @@ def load_saved_workspace(
                         if input_face_button:
                             input_face_button.setChecked(True)
 
-                    for embedding_id in first_face_button.assigned_merged_embeddings.keys():
+                    for (
+                        embedding_id
+                    ) in first_face_button.assigned_merged_embeddings.keys():
                         embed_button = main_window.merged_embeddings.get(embedding_id)
                         if embed_button:
                             embed_button.setChecked(True)
@@ -789,7 +794,9 @@ def load_saved_workspace(
                         first_face_button, "assigned_kv_map", None
                     )
 
-                video_control_actions.refresh_issue_frames_for_selected_face(main_window)
+                video_control_actions.refresh_issue_frames_for_selected_face(
+                    main_window
+                )
                 video_control_actions.update_scan_review_button_states(main_window)
 
                 common_widget_actions.set_widgets_values_using_face_id_parameters(
@@ -1133,7 +1140,9 @@ def save_current_workspace(
             main_window.selected_video_button, widget_components.TargetMediaCardButton
         )
         else False,
-        "selected_target_face_id": getattr(main_window, "selected_target_face_id", None),
+        "selected_target_face_id": getattr(
+            main_window, "selected_target_face_id", None
+        ),
         "swap_faces_enabled": main_window.swapfacesButton.isChecked(),
         "edit_faces_enabled": main_window.editFacesButton.isChecked(),
         "input_faces_data": input_faces_data,

@@ -100,10 +100,20 @@ class ListWidgetEventFilter(QtCore.QObject):
         list_widget: QtWidgets.QListWidget,
         event: QtCore.QEvent | QtGui.QDropEvent | QtGui.QMouseEvent,
     ):
-        if (
-            list_widget == self.main_window.targetVideosList
-            or list_widget == self.main_window.targetVideosList.viewport()
-        ):
+        # During application shutdown, Qt deletes the C++ widgets before the
+        # Python wrappers; events may still fire on this filter while the
+        # underlying QListWidget / its viewport have already been destroyed.
+        # Touching them then raises shiboken's "Internal C++ object … already
+        # deleted." Bail out cleanly so the atexit traceback stops appearing.
+        try:
+            target_videos_list = self.main_window.targetVideosList
+            target_videos_viewport = target_videos_list.viewport()
+            input_faces_list = self.main_window.inputFacesList
+            input_faces_viewport = input_faces_list.viewport()
+        except RuntimeError:
+            return False
+
+        if list_widget == target_videos_list or list_widget == target_videos_viewport:
             if event.type() == QtCore.QEvent.Type.MouseButtonPress:
                 if (
                     event.button() == QtCore.Qt.MouseButton.LeftButton
@@ -155,10 +165,7 @@ class ListWidgetEventFilter(QtCore.QObject):
                     event.acceptProposedAction()
                     return True
 
-        elif (
-            list_widget == self.main_window.inputFacesList
-            or list_widget == self.main_window.inputFacesList.viewport()
-        ):
+        elif list_widget == input_faces_list or list_widget == input_faces_viewport:
             if event.type() == QtCore.QEvent.Type.MouseButtonPress:
                 if (
                     event.button() == QtCore.Qt.MouseButton.LeftButton

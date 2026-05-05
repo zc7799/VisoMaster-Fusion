@@ -110,9 +110,7 @@ def _has_pending_target_media_thumbnail_work(main_window: "MainWindow") -> bool:
 def add_media_thumbnail_to_target_videos_list(
     main_window: "MainWindow", media_path, q_image, file_type, media_id
 ):
-    _queue_target_media_thumbnail(
-        main_window, media_path, q_image, file_type, media_id
-    )
+    _queue_target_media_thumbnail(main_window, media_path, q_image, file_type, media_id)
 
 
 # Functions to add Buttons with thumbnail for selecting videos/images and faces
