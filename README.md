@@ -192,7 +192,7 @@ uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu
 uv pip install numpy scipy scikit-image opencv-python pillow pytest pytest-mock
 ```
 
-If you already have a `.venv` with the full `requirements_cu129.txt` installed, you can run tests directly in it.
+If you already have a `.venv` with the full `requirements_cu13.txt` installed, you can run tests directly in it.
 
 **Run tests**
 
