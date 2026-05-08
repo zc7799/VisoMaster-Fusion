@@ -479,7 +479,7 @@ def filter_target_videos(main_window):
 
 @QtCore.Slot()
 def load_target_webcams(
-    main_window: "MainWindow",
+    main_window: "MainWindow", *args, **kwargs
 ):
     from app.ui.widgets.actions import video_control_actions
 
