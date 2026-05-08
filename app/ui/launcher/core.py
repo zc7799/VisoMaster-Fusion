@@ -10,6 +10,7 @@
 # ---------------------------------------------------------------------------
 
 from pathlib import Path
+import os
 import sys
 import subprocess
 from PySide6 import QtWidgets
@@ -89,24 +90,29 @@ def run_python(script_path: Path, args: list | None = None):
 
 # UV network tuning defaults.
 # These can be overridden by setting environment variables before launching.
-# UV_TIMEOUT: per-request HTTP timeout in seconds (default 120 s).
+# UV_HTTP_TIMEOUT: per-request HTTP read timeout in seconds (default 120 s).
 #   Increase if large wheels (torch, onnxruntime) time out on slow connections.
-# UV_RETRIES: number of retry attempts on transient network errors (default 5).
+# UV_HTTP_RETRIES: number of retry attempts on transient network errors (default 5).
 # UV_CONCURRENT_DOWNLOADS: parallel download slots (default 4).
 #   Reduce to 1 on very slow / metered connections to avoid overloading the pipe.
-_UV_TIMEOUT = "120"
-_UV_RETRIES = "5"
+_UV_HTTP_TIMEOUT = "120"
+_UV_HTTP_RETRIES = "5"
 _UV_CONCURRENT_DOWNLOADS = "4"
 
 
 def uv_pip_install():
     """Run dependency installation using the portable uv executable.
 
-    Passes explicit timeout, retry, and concurrency flags so that slow or
-    unstable connections (common in portable installs) do not abort mid-install
-    with a cryptic timeout error.
+    Passes uv network tuning via environment variables so that slow or unstable
+    connections (common in portable installs) do not abort mid-install with a
+    cryptic timeout error. Existing user-provided uv environment values win.
     """
-    subprocess.run(
+    env = os.environ.copy()
+    env.setdefault("UV_HTTP_TIMEOUT", _UV_HTTP_TIMEOUT)
+    env.setdefault("UV_HTTP_RETRIES", _UV_HTTP_RETRIES)
+    env.setdefault("UV_CONCURRENT_DOWNLOADS", _UV_CONCURRENT_DOWNLOADS)
+
+    return subprocess.run(
         [
             str(PATHS["UV_EXE"]),
             "pip",
@@ -115,13 +121,9 @@ def uv_pip_install():
             str(PATHS["REQ_FILE"]),
             "--python",
             str(PATHS["PYTHON_EXE"]),
-            "--timeout",
-            _UV_TIMEOUT,
-            "--retries",
-            _UV_RETRIES,
-            "--concurrent-downloads",
-            _UV_CONCURRENT_DOWNLOADS,
         ],
         cwd=str(PATHS["APP_DIR"]),
+        env=env,
+        check=True,
         shell=False,
     )
