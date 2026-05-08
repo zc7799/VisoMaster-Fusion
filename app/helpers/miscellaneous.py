@@ -1151,14 +1151,26 @@ def keypoints_adjustments(
 
     # --- MANUAL ALIGNMENTS (Sliders) ---
     if parameters.get("FaceAdjEnableToggle", False):
-        kps_5_adj[:, 0] += parameters["KpsXSlider"]
-        kps_5_adj[:, 1] += parameters["KpsYSlider"]
-        kps_5_adj[:, 0] -= 255
-        kps_5_adj[:, 0] *= 1 + parameters["KpsScaleSlider"] / 100.0
-        kps_5_adj[:, 0] += 255
-        kps_5_adj[:, 1] -= 255
-        kps_5_adj[:, 1] *= 1 + parameters["KpsScaleSlider"] / 100.0
-        kps_5_adj[:, 1] += 255
+        # 1. Apply spatial translations (X / Y Axis)
+        # Adjusts the facial keypoints position based on user-defined offsets.
+        kps_5_adj[:, 0] += parameters.get("KpsXSlider", 0.0)
+        kps_5_adj[:, 1] += parameters.get("KpsYSlider", 0.0)
+
+        # 2. Apply spatial scaling
+        # Resizes the face representation while maintaining its relative geometry.
+        scale_val = parameters.get("KpsScaleSlider", 0.0)
+        if scale_val != 0.0:
+            scale_factor = 1.0 + (scale_val / 100.0)
+
+            # FW-BUG-FIX: Dynamic Centroid Calculation.
+            # Replaced the hardcoded '255' center with the actual barycenter
+            # of the face keypoints. This prevents unwanted translation (drift)
+            # when resizing faces that are not perfectly centered at (255, 255).
+            centroid = np.mean(kps_5_adj, axis=0)  # Returns array([mean_x, mean_y])
+
+            # Vectorized scaling: (Point - Centroid) * Scale + Centroid
+            # Computes both X and Y axes simultaneously for optimal NumPy performance.
+            kps_5_adj = (kps_5_adj - centroid) * scale_factor + centroid
 
     if (
         parameters.get("LandmarksPositionAdjEnableToggle", False)

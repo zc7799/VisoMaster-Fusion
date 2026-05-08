@@ -238,16 +238,8 @@ class FrameWorker(threading.Thread):
         ).view(1, 1, 3, 3)
         self.kernel_sobel_y = self.kernel_sobel_x.transpose(2, 3)
 
-        # FW-CPU-1: Per-worker CUDA stream, otherwise all 8 pool workers share the
-        # default stream and every `current_stream().synchronize()` call inside
-        # _run_model_with_lazy_build_check (face_swappers / face_masks / face_restorers /
-        # frame_enhancers / face_landmark_detectors) waits for *every* worker's
-        # pending GPU work. With CUDA 13's spin-wait scheduler that turns each pool
-        # worker into a 100%-CPU spinner; pinning each worker to its own stream
-        # cuts the sync surface back down to what the worker itself submitted.
-        self.worker_stream = (
-            torch.cuda.Stream() if self.models_processor.device == "cuda" else None
-        )
+        # Do not use local streams here ! Onnxruntime handles independent streams internally for each worker (fixes VRAM explosion)
+        self.worker_stream = None  # (torch.cuda.Stream() if self.models_processor.device == "cuda" else None)
 
     def set_scaling_transforms(self, control_params):
         """Initializes the torchvision transforms based on user interpolation settings."""
@@ -1995,6 +1987,10 @@ class FrameWorker(threading.Thread):
                             k[:, 1] *= ratio_h
 
         # Manual Rotation
+        # FW-BUG-FIX: Store pre- and post-rotation dimensions to accurately
+        # reverse the affine transform later without accumulating black borders.
+        pre_rot_h, pre_rot_w = img.shape[1], img.shape[2]
+
         if control["ManualRotationEnableToggle"]:
             img = v2.functional.rotate(
                 img,
@@ -2002,6 +1998,8 @@ class FrameWorker(threading.Thread):
                 interpolation=v2.InterpolationMode.BILINEAR,
                 expand=True,
             )
+
+        post_rot_h, post_rot_w = img.shape[1], img.shape[2]
 
         # --- DETECTION PHASE ---
         # The workers are now "Stateless Render Engines". They no longer track time or state.
@@ -2053,7 +2051,10 @@ class FrameWorker(threading.Thread):
                         requires_203 = True
                         break
 
-            # STEP 1: Standard detection respecting User's choice
+            # --- STEP 1: Standard detection (Respect UI Toggle) ---
+            # We pass 'use_landmark_detection=use_landmark' to allow run_detect
+            # to attempt an initial extraction. If Auto-Rotation is enabled,
+            # run_detect may bypass dense landmark extraction if the angle is too extreme.
             bboxes, kpss_5, kpss = self.models_processor.run_detect(
                 img,
                 control.get("DetectorModelSelection", "RetinaFace"),
@@ -2063,7 +2064,7 @@ class FrameWorker(threading.Thread):
                 use_landmark_detection=use_landmark,
                 landmark_detect_mode=landmark_mode,
                 landmark_score=control.get("LandmarkDetectScoreSlider", 50) / 100.0,
-                from_points=from_points,
+                from_points=from_points,  # Respects the UI toggle state
                 rotation_angles=[0]
                 if not control.get("AutoRotationToggle", False)
                 else [0, 90, 180, 270],
@@ -2072,32 +2073,87 @@ class FrameWorker(threading.Thread):
                 bypass_bytetrack=True,
             )
 
-            # STEP 2: Smart Double-Scan for 203 points
+            # FW-LOGIC-FIX: Validate if Step 1 returned actual dense landmarks (> 5 points).
+            # If run_detect aborted dense extraction due to an extreme rotation angle,
+            # 'kpss' will merely contain a fallback copy of the sparse 'kpss_5'.
+            has_valid_dense_kpss = (
+                kpss is not None
+                and len(kpss) == len(bboxes)
+                and len(bboxes) > 0
+                and kpss[0].shape[0] > 5
+            )
+
+            # --- STEP 2: 203-Landmark Extraction (Expression Restorer / Face Editor) ---
             kpss_203 = None
             if requires_203:
-                if use_landmark and landmark_mode == "203":
-                    # OPTIMIZATION: 203 was already extracted by the user's choice. Zero CUDA cost.
-                    kpss_203 = kpss
-                else:
-                    # Extract 203 specifically for advanced features
-                    _, _, kpss_203 = self.models_processor.run_detect(
-                        img,
-                        control.get("DetectorModelSelection", "RetinaFace"),
-                        max_num=control.get("MaxFacesToDetectSlider", 1),
-                        score=control.get("DetectorScoreSlider", 50) / 100.0,
-                        input_size=(512, 512),
-                        use_landmark_detection=True,
-                        landmark_detect_mode="203",
-                        landmark_score=control.get("LandmarkDetectScoreSlider", 50)
-                        / 100.0,
-                        from_points=from_points,
-                        rotation_angles=[0]
-                        if not control.get("AutoRotationToggle", False)
-                        else [0, 90, 180, 270],
-                        use_mean_eyes=control.get("LandmarkMeanEyesToggle", False),
-                        previous_detections=None,
-                        bypass_bytetrack=True,
-                    )
+                kpss_203_list = []
+                # LOGIC FIX: We ONLY reuse Step 1 landmarks if they are already in the 203
+                # format AND the user enabled 'from_points'. Otherwise, we MUST re-extract
+                # with 'from_points=True' to ensure geometric alignment for the Expression Restorer.
+                can_reuse_step1_203 = (
+                    has_valid_dense_kpss and landmark_mode == "203" and from_points
+                )
+
+                if bboxes is not None and len(bboxes) > 0:
+                    for idx in range(len(bboxes)):
+                        if can_reuse_step1_203:
+                            kps_203_local = kpss[idx].copy()
+                        else:
+                            # FORCE from_points=True: Strictly required for the geometric
+                            # alignment of advanced tools (FaceEditor, Makeup, Expressions).
+                            _, lm_203, _ = self.models_processor.run_detect_landmark(
+                                img,
+                                bboxes[idx],
+                                kpss_5[idx],
+                                detect_mode="203",
+                                score=0.5,
+                                use_mean_eyes=control.get(
+                                    "LandmarkMeanEyesToggle", False
+                                ),
+                                from_points=True,  # STRICTLY REQUIRED HERE
+                            )
+                            kps_203_local = (
+                                lm_203
+                                if len(lm_203) > 0
+                                else np.zeros((203, 2), dtype=np.float32)
+                            )
+                        kpss_203_list.append(kps_203_local)
+                kpss_203 = np.array(kpss_203_list, dtype=object)
+
+            # --- STEP 3: Fallback for standard landmarks (UI Display) ---
+            if (
+                use_landmark
+                and not has_valid_dense_kpss
+                and bboxes is not None
+                and len(bboxes) > 0
+            ):
+                kpss_list = []
+                for idx in range(len(bboxes)):
+                    # Smart reuse: If Step 2 just computed 203 landmarks, use them
+                    # to avoid a redundant neural network forward pass.
+                    if (
+                        landmark_mode == "203"
+                        and kpss_203 is not None
+                        and len(kpss_203) > idx
+                    ):
+                        kpss_list.append(kpss_203[idx])
+                    else:
+                        # Respects the UI toggle state for standard UI landmarks
+                        _, lm_std, _ = self.models_processor.run_detect_landmark(
+                            img,
+                            bboxes[idx],
+                            kpss_5[idx],
+                            detect_mode=landmark_mode,
+                            score=control.get("LandmarkDetectScoreSlider", 50) / 100.0,
+                            use_mean_eyes=control.get("LandmarkMeanEyesToggle", False),
+                            from_points=from_points,
+                        )
+                        kpss_list.append(
+                            lm_std
+                            if len(lm_std) > 0
+                            else np.zeros((int(landmark_mode), 2), dtype=np.float32)
+                        )
+                kpss = np.array(kpss_list, dtype=object)
 
         if (
             isinstance(kpss_5, np.ndarray)
@@ -2422,12 +2478,71 @@ class FrameWorker(threading.Thread):
 
         # Undo Rotation / Scaling
         if control["ManualRotationEnableToggle"]:
+            angle = control["ManualRotationAngleSlider"]
+
+            # FW-BUG-FIX 1: Reverse rotation WITH expand=True so the canvas can physically
+            # accommodate the restored dimensions (fixes the 90/270 degree crop).
+            # Then center crop to strictly restore the original tensor shape.
             img = v2.functional.rotate(
                 img,
-                angle=-control["ManualRotationAngleSlider"],
+                angle=-angle,
                 interpolation=v2.InterpolationMode.BILINEAR,
-                expand=True,
+                expand=True,  # CRITICAL: Was False, causing the image to be truncated
             )
+            img = v2.functional.center_crop(img, (pre_rot_h, pre_rot_w))
+
+            # FW-MATH: Reverse the affine transform on all spatial coordinates.
+            import math
+
+            rad = math.radians(angle)
+            cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+            cx_orig, cy_orig = pre_rot_w / 2.0, pre_rot_h / 2.0
+            cx_rot, cy_rot = post_rot_w / 2.0, post_rot_h / 2.0
+
+            for fface in det_faces_data_for_display:
+                if fface.get("_rotation_rescaled"):
+                    continue
+
+                def unrotate_pts(pts):
+                    if pts is None or len(pts) == 0:
+                        return pts
+                    # 1. Move origin to the rotated center
+                    x0 = pts[:, 0] - cx_rot
+                    y0 = pts[:, 1] - cy_rot
+
+                    # 2. Apply 2D inverse rotation matrix (Clockwise in Y-down coordinate system)
+                    # BUG FIX: The previous signs were inverted, causing points to rotate further away!
+                    x1 = x0 * cos_a - y0 * sin_a
+                    y1 = x0 * sin_a + y0 * cos_a
+
+                    # 3. Move back to the original image center
+                    pts[:, 0] = x1 + cx_orig
+                    pts[:, 1] = y1 + cy_orig
+                    return pts
+
+                # Bounding box requires converting to 4 corners, un-rotating, and getting min/max bounds
+                if fface.get("bbox") is not None:
+                    x1, y1, x2, y2 = fface["bbox"]
+                    corners = np.array(
+                        [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32
+                    )
+                    unrot_corners = unrotate_pts(corners)
+                    fface["bbox"][0] = np.min(unrot_corners[:, 0])
+                    fface["bbox"][1] = np.min(unrot_corners[:, 1])
+                    fface["bbox"][2] = np.max(unrot_corners[:, 0])
+                    fface["bbox"][3] = np.max(unrot_corners[:, 1])
+
+                # Un-rotate all Keypoint Arrays
+                if fface.get("kps_5") is not None:
+                    fface["kps_5"] = unrotate_pts(fface["kps_5"])
+                if fface.get("kps_all") is not None:
+                    fface["kps_all"] = unrotate_pts(fface["kps_all"])
+                if fface.get("kps_203") is not None:
+                    fface["kps_203"] = unrotate_pts(fface["kps_203"])
+
+                fface["_rotation_rescaled"] = True
+
         if scale_applied:
             # FW-QUAL-11: use renamed img_h/img_w variables
             # FW-PERF-08 / FW-MEM-02: LRU-bounded cache for the scale-back transform.

@@ -188,7 +188,7 @@ SWAPPER_LAYOUT_DATA: Any = {  # noqa: F811
         "BordermaskEnableToggle": {
             "level": 1,
             "label": "Border Mask",
-            "default": False,
+            "default": True,  # Default to True to prevent black square around the swap when no occlusion is selected
             "help": "A rectangle with adjustable bottom, left, right, top, and sides that masks the swapped face result back into the original image.",
         },
         "BorderBottomSlider": {

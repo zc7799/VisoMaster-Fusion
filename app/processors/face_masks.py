@@ -183,15 +183,31 @@ class FaceMasks:
             )
             enhanced_swap_img[:, ymin:ymax, xmin:xmax] = sharpened_mouth
 
-        # --- Alignment Logic (Stable Center of Mass) ---
+        # --- Alignment Logic (Statistical Anchoring) ---
         y_s_full, x_s_full = torch.where(mouth_swap)
-        y_s_inner, _ = torch.where(inner_swap)
 
-        # Use Mean (Center of Mass) instead of min/max to avoid temporal jittering
+        # X-axis centroid of the entire mouth (highly stable spatial reference)
         cx_s = x_s_full.float().mean()
-        # Keep the top of the inner mouth as Y anchor (but average the top 5% to avoid 1-pixel noise)
-        top_y_k = max(1, int(y_s_inner.shape[0] * 0.01))
-        cy_s = torch.topk(y_s_inner.float(), k=top_y_k, largest=False).values.mean()
+
+        # FW-PERF-FIX: Pure GPU control flow (CUDA Sync Avoidance)
+        # Using pure boolean tensor logic avoids CPU-GPU synchronization.
+        mask_upper = labels_swap == 12
+        has_upper = mask_upper.any()
+
+        # Dynamically select the mask: if upper lip exists, use it. Otherwise, fallback to inner_swap.
+        target_mask = mask_upper | (inner_swap & ~has_upper)
+        y_s_target, _ = torch.where(target_mask)
+
+        # FW-BUG-FIX: "Statistical Boundary" anchoring.
+        # Calculates the teeth line by averaging all pixels of the target mask.
+        mean_ys = y_s_target.float().mean()
+        std_ys = y_s_target.float().std()
+
+        # Gracefully handle NaN strictly on the GPU (e.g., if only 1 pixel is found, std is NaN)
+        std_ys = torch.nan_to_num(std_ys, nan=0.0)
+
+        # The center of the reference region + 1.5x its standard deviation = optimal teeth alignment line
+        cy_s = mean_ys + 1.5 * std_ys
 
         mouthzoom = parameters.get("MouthParserStretchDecimalSlider", 1.05)
 
@@ -306,32 +322,60 @@ class FaceMasks:
             )
             enhanced_img_orig[:, ymin:ymax, xmin:xmax] = sharpened_mouth
 
-        # --- Alignment Logic (Stable Center of Mass) ---
+        # --- Alignment Logic (Statistical Anchoring) ---
         y_o_full, x_o_full = torch.where(mouth_orig)
         y_s_full, x_s_full = torch.where(mouth_swap)
 
-        w_o = (x_o_full.max() - x_o_full.min()).float()
-        w_s = (x_s_full.max() - x_s_full.min()).float()
+        # 1. SCALE (Width Standard Deviation)
+        # Width is calculated based on spatial dispersion. Even if the mask jitters,
+        # the scale factor will remain completely stable over time.
+        std_x_o = x_o_full.float().std()
+        std_x_s = x_s_full.float().std()
 
-        if w_o <= 0.0 or w_s <= 0.0:
+        if (
+            std_x_o <= 0.0
+            or std_x_s <= 0.0
+            or torch.isnan(std_x_o)
+            or torch.isnan(std_x_s)
+        ):
             return None, None
 
+        mouthzoom = parameters.get("MouthParserStretchDecimalSlider", 1.05)
+        scale_factor = (std_x_s / std_x_o) * mouthzoom
+
+        # 2. X-AXIS CENTROID
         cx_o = x_o_full.float().mean()
         cx_s = x_s_full.float().mean()
 
-        y_anchor_orig = torch.where(inner_orig)[0]
-        y_anchor_swap = torch.where(inner_swap)[0]
+        # 3. Y-AXIS ANCHORING (Statistical Boundary of the upper lip)
+        # FW-PERF-FIX: Pure GPU control flow (CUDA Sync Avoidance)
+        # Replaced CPU-side 'len()' checks with pure boolean tensor logic.
 
-        top_o_k = max(1, int(y_anchor_orig.shape[0] * 0.01))
-        top_s_k = max(1, int(y_anchor_swap.shape[0] * 0.01))
-        cy_o = torch.topk(y_anchor_orig.float(), k=top_o_k, largest=False).values.mean()
-        cy_s = torch.topk(y_anchor_swap.float(), k=top_s_k, largest=False).values.mean()
+        # --- Original Mouth Anchoring ---
+        mask_o_upper = labels_orig == 12
+        has_o_upper = mask_o_upper.any()
 
-        mouthzoom = parameters.get("MouthParserStretchDecimalSlider", 1.05)
-        scale_factor = (w_s / w_o) * mouthzoom
+        # Fallback to the entire original mouth if no upper lip is detected
+        target_mask_o = mask_o_upper | (mouth_orig & ~has_o_upper)
+        y_o_target, _ = torch.where(target_mask_o)
 
-        if scale_factor <= 0.0:
-            return None, None
+        mean_yo = y_o_target.float().mean()
+        std_yo = y_o_target.float().std()
+        std_yo = torch.nan_to_num(std_yo, nan=0.0)
+        cy_o = mean_yo + 1.5 * std_yo
+
+        # --- Swapped Mouth Anchoring ---
+        mask_s_upper = labels_swap == 12
+        has_s_upper = mask_s_upper.any()
+
+        # Fallback to the entire swapped mouth if no upper lip is detected
+        target_mask_s = mask_s_upper | (mouth_swap & ~has_s_upper)
+        y_s_target, _ = torch.where(target_mask_s)
+
+        mean_ys = y_s_target.float().mean()
+        std_ys = y_s_target.float().std()
+        std_ys = torch.nan_to_num(std_ys, nan=0.0)
+        cy_s = mean_ys + 1.5 * std_ys
 
         translate_x = cx_s - cx_o
         translate_y = cy_s - cy_o
@@ -363,6 +407,8 @@ class FaceMasks:
         content_mask_blurred = v2.functional.gaussian_blur(
             content_mask.unsqueeze(0), kernel_size=5, sigma=1.0
         ).squeeze(0)
+
+        w_s = (x_s_full.max() - x_s_full.min()).float()
 
         # 2. Destroy the fake teeth with blur (Controlled by UI Slider)
         cavity_blur_pct = parameters.get("MouthOriginalCavityBlurSlider", 15) / 100.0

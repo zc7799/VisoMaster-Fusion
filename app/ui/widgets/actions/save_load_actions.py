@@ -483,7 +483,11 @@ def load_saved_workspace(
 
             # OPTIMIZED: Force PySide6 to process the pending 'thumbnail_ready' signals
             # before continuing, ensuring UI elements are fully instantiated.
-            QtWidgets.QApplication.processEvents()
+            while list_view_actions._has_pending_target_media_thumbnail_work(
+                main_window
+            ):
+                list_view_actions._flush_target_media_thumbnail_batch(main_window)
+                QtWidgets.QApplication.processEvents()
 
             # Select target media (Secured with .get to prevent KeyError on older workspaces)
             selected_media_id = data.get("selected_media_id", False)
@@ -779,16 +783,18 @@ def load_saved_workspace(
                     card_actions.uncheck_all_merged_embeddings(main_window)
 
                     for input_face_id in first_face_button.assigned_input_faces.keys():
-                        input_face_button = main_window.input_faces.get(input_face_id)
-                        if input_face_button:
-                            input_face_button.setChecked(True)
+                        assigned_input_btn = main_window.input_faces.get(input_face_id)
+                        if assigned_input_btn:
+                            assigned_input_btn.setChecked(True)
 
                     for (
                         embedding_id
                     ) in first_face_button.assigned_merged_embeddings.keys():
-                        embed_button = main_window.merged_embeddings.get(embedding_id)
-                        if embed_button:
-                            embed_button.setChecked(True)
+                        assigned_embed_btn = main_window.merged_embeddings.get(
+                            embedding_id
+                        )
+                        if assigned_embed_btn:
+                            assigned_embed_btn.setChecked(True)
 
                     main_window.current_kv_tensors_map = getattr(
                         first_face_button, "assigned_kv_map", None

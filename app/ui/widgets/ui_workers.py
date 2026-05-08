@@ -46,6 +46,9 @@ class TargetMediaLoaderWorker(qtc.QThread):
         self.sort_files_list_by_name = sort_files_list_by_name
         self.webcam_mode = webcam_mode
         self._running = True  # Flag to control the running state
+        self.control_snapshot = (
+            main_window.control.copy() if getattr(main_window, "control", None) else {}
+        )
 
     def run(self):
         if self.folder_name:
@@ -69,7 +72,7 @@ class TargetMediaLoaderWorker(qtc.QThread):
         self.main_window.placeholder_update_signal.emit(
             self.main_window.targetVideosList, True
         )
-        recursive_toggle = self.main_window.control.get(
+        recursive_toggle = self.control_snapshot.get(
             "TargetMediaFolderRecursiveToggle", False
         )
 
@@ -92,7 +95,7 @@ class TargetMediaLoaderWorker(qtc.QThread):
                 self.main_window,
                 media_file_path,
                 file_type,
-                cache_thumbnail=False,
+                cache_thumbnail=True,
             )
 
             media_id = self.media_ids[i] if self.media_ids else str(uuid.uuid1().int)
@@ -131,7 +134,7 @@ class TargetMediaLoaderWorker(qtc.QThread):
                 self.main_window,
                 media_file_path,
                 file_type=file_type,
-                cache_thumbnail=False,
+                cache_thumbnail=True,
             )
             if q_image:
                 # Emit the signal to update GUI
@@ -146,9 +149,9 @@ class TargetMediaLoaderWorker(qtc.QThread):
             self.main_window.targetVideosList, True
         )
         camera_backend = CAMERA_BACKENDS[
-            self.main_window.control.get("WebcamBackendSelection", "DirectShow")
+            self.control_snapshot.get("WebcamBackendSelection", "DirectShow")
         ]
-        max_no = int(self.main_window.control.get("WebcamMaxNoSelection", 1))
+        max_no = int(self.control_snapshot.get("WebcamMaxNoSelection", 1))
 
         for i in range(max_no):
             try:

@@ -310,45 +310,54 @@ class SequentialDetector:
             # to prevent downstream ".copy()" calls from throwing AttributeError.
             kps_standard = current_kps5.copy()
 
-            # Extract standard dense landmarks (68 or 203 depending on UI selection)
-            if use_landmark:
-                _, lm_kpss, _ = self.main_window.models_processor.run_detect_landmark(
+            # FW-LOGIC-FIX 1: Extract forced 203 landmarks FIRST if advanced editing features demand it.
+            # This ensures we always have a properly aligned 203 if required, independently of UI settings.
+            kps_203_local = numpy.zeros((203, 2), dtype=numpy.float32)
+            has_valid_203 = False
+
+            if requires_203:
+                _, lm_203, _ = self.main_window.models_processor.run_detect_landmark(
                     frame_tensor,
                     current_bbox,
                     current_kps5,
-                    detect_mode=landmark_mode,
-                    score=control.get("LandmarkDetectScoreSlider", 50) / 100.0,
+                    detect_mode="203",
+                    score=0.5,
                     use_mean_eyes=control.get("LandmarkMeanEyesToggle", False),
-                    from_points=True,
+                    from_points=True,  # STRICTLY REQUIRED FOR INTERNAL ALIGNMENT
                 )
-                if len(lm_kpss) > 0:
-                    kps_standard = lm_kpss
+                if len(lm_203) > 0:
+                    kps_203_local = lm_203
+                    has_valid_203 = True
+                filtered_kpss_203.append(kps_203_local)
 
-            filtered_kpss.append(kps_standard)
-
-            # Extract forced 203 landmarks if advanced editing features demand it
-            if requires_203:
-                kps_203_local = numpy.zeros((203, 2), dtype=numpy.float32)
-
-                # Optimization: If the user already selected 203 as standard, reuse it to save a CUDA call
-                if use_landmark and landmark_mode == "203" and len(kps_standard) == 203:
-                    kps_203_local = kps_standard.copy()
+            # FW-LOGIC-FIX 2: Extract standard dense landmarks (68, 203 or 478 depending on UI selection)
+            if use_landmark:
+                # OPTIMIZATION: Reuse the 203 landmarks computed above ONLY IF
+                # the user explicitly enabled 'from_points' in the UI.
+                # This effectively prevents a redundant and costly neural network forward pass.
+                if (
+                    landmark_mode == "203"
+                    and requires_203
+                    and has_valid_203
+                    and from_points
+                ):
+                    kps_standard = kps_203_local.copy()
                 else:
-                    _, lm_203, _ = (
+                    _, lm_kpss, _ = (
                         self.main_window.models_processor.run_detect_landmark(
                             frame_tensor,
                             current_bbox,
                             current_kps5,
-                            detect_mode="203",
-                            score=0.5,
+                            detect_mode=landmark_mode,
+                            score=control.get("LandmarkDetectScoreSlider", 50) / 100.0,
                             use_mean_eyes=control.get("LandmarkMeanEyesToggle", False),
-                            from_points=True,
+                            from_points=from_points,
                         )
                     )
-                    if len(lm_203) > 0:
-                        kps_203_local = lm_203
+                    if len(lm_kpss) > 0:
+                        kps_standard = lm_kpss
 
-                filtered_kpss_203.append(kps_203_local)
+            filtered_kpss.append(kps_standard)
 
         # Reformat output arrays to match the expected pipeline signature (CRITICAL TYPE CASTING)
         bboxes = numpy.array(filtered_bboxes, dtype=numpy.float32)

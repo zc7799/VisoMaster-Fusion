@@ -34,6 +34,11 @@ def _kps5_is_degenerate(kps5) -> bool:
     """
     if kps5 is None:
         return True
+
+    # Safely convert PyTorch tensors (especially on CUDA) to numpy arrays.
+    if torch.is_tensor(kps5):
+        kps5 = kps5.detach().cpu().numpy()
+
     try:
         kps5 = np.asarray(kps5, dtype=np.float32)
     except (ValueError, TypeError):
@@ -279,17 +284,27 @@ class FaceLandmarkDetectors:
         Prepares a cropped and warped face image for a landmark detector.
         This helper centralizes the repetitive pre-processing logic of aligning a face
         based on either a bounding box or existing keypoints.
-
         Returns:
             Tuple[torch.Tensor, np.ndarray, np.ndarray]: The cropped image, the forward transform matrix (M),
                                                           and the inverse transform matrix (IM).
         """
+        import math
+
         if not from_points:
             # Align the face using the bounding box center and size.
             w, h = (bbox[2] - bbox[0]), (bbox[3] - bbox[1])
             center = (bbox[2] + bbox[0]) / 2, (bbox[3] + bbox[1]) / 2
             _scale = target_size / (max(w, h) * scale)
-            aimg, M = faceutil.transform(img, center, target_size, _scale, 0)
+
+            # Correct math implementation to upright tilted faces in fallback mode.
+            angle = 0.0
+            if det_kpss is not None and len(det_kpss) >= 2:
+                dx = det_kpss[1][0] - det_kpss[0][0]
+                dy = det_kpss[1][1] - det_kpss[0][1]
+                if math.hypot(dx, dy) > 1e-3:
+                    angle = math.degrees(math.atan2(-dy, dx))
+
+            aimg, M = faceutil.transform(img, center, target_size, _scale, angle)
             IM = faceutil.invertAffineTransform(M)
         else:
             if det_kpss is None or len(det_kpss) == 0:
