@@ -1,11 +1,11 @@
 @echo off
-REM Resolve repo root whether this script lives in the repo root or app\scripts.
+REM Resolve repo root whether this script lives in the repo root or scripts.
 SET "SCRIPT_DIR=%~dp0"
 
 IF EXIST "%SCRIPT_DIR%main.py" (
     SET "REPO_ROOT=%SCRIPT_DIR%"
-) ELSE IF EXIST "%SCRIPT_DIR%..\..\main.py" (
-    FOR %%A IN ("%SCRIPT_DIR%..\..") DO SET "REPO_ROOT=%%~fA"
+) ELSE IF EXIST "%SCRIPT_DIR%..\main.py" (
+    FOR %%A IN ("%SCRIPT_DIR%..") DO SET "REPO_ROOT=%%~fA"
 ) ELSE (
     echo [ERROR] Could not locate repo root from "%SCRIPT_DIR%".
     pause
