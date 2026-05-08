@@ -2101,32 +2101,39 @@ class FrameWorker(threading.Thread):
                         else:
                             # FORCE from_points=True: Strictly required for the geometric
                             # alignment of advanced tools (FaceEditor, Makeup, Expressions).
-                            _, lm_203, _ = self.models_processor.run_detect_landmark(
-                                img,
-                                bboxes[idx],
-                                kpss_5[idx],
-                                detect_mode="203",
-                                score=0.5,
-                                use_mean_eyes=control.get(
-                                    "LandmarkMeanEyesToggle", False
-                                ),
-                                from_points=True,  # STRICTLY REQUIRED HERE
+                            lm_203_5, lm_203, _ = (
+                                self.models_processor.run_detect_landmark(
+                                    img,
+                                    bboxes[idx],
+                                    kpss_5[idx],
+                                    detect_mode="203",
+                                    score=0.5,
+                                    use_mean_eyes=control.get(
+                                        "LandmarkMeanEyesToggle", False
+                                    ),
+                                    from_points=True,  # STRICTLY REQUIRED HERE
+                                )
                             )
                             kps_203_local = (
                                 lm_203
                                 if len(lm_203) > 0
                                 else np.zeros((203, 2), dtype=np.float32)
                             )
+
+                            # If Step 1 failed and user actually requested 203 for the swap,
+                            # ensure we update the Swapper's 5 points right now.
+                            if (
+                                landmark_mode == "203"
+                                and not has_valid_dense_kpss
+                                and len(lm_203_5) > 0
+                            ):
+                                kpss_5[idx] = lm_203_5
+
                         kpss_203_list.append(kps_203_local)
                 kpss_203 = np.array(kpss_203_list, dtype=object)
 
-            # --- STEP 3: Fallback for standard landmarks (UI Display) ---
-            if (
-                use_landmark
-                and not has_valid_dense_kpss
-                and bboxes is not None
-                and len(bboxes) > 0
-            ):
+            # --- STEP 3: Fallback for standard landmarks (UI Display & Swap Alignment) ---
+            if use_landmark and not has_valid_dense_kpss and len(bboxes) > 0:
                 kpss_list = []
                 for idx in range(len(bboxes)):
                     # Smart reuse: If Step 2 just computed 203 landmarks, use them
@@ -2139,7 +2146,7 @@ class FrameWorker(threading.Thread):
                         kpss_list.append(kpss_203[idx])
                     else:
                         # Respects the UI toggle state for standard UI landmarks
-                        _, lm_std, _ = self.models_processor.run_detect_landmark(
+                        lm_std_5, lm_std, _ = self.models_processor.run_detect_landmark(
                             img,
                             bboxes[idx],
                             kpss_5[idx],
@@ -2148,11 +2155,15 @@ class FrameWorker(threading.Thread):
                             use_mean_eyes=control.get("LandmarkMeanEyesToggle", False),
                             from_points=from_points,
                         )
-                        kpss_list.append(
-                            lm_std
-                            if len(lm_std) > 0
-                            else np.zeros((int(landmark_mode), 2), dtype=np.float32)
-                        )
+
+                        if len(lm_std) > 0:
+                            kpss_list.append(lm_std)
+                            if len(lm_std_5) > 0:
+                                kpss_5[idx] = lm_std_5
+                        else:
+                            kpss_list.append(
+                                np.zeros((int(landmark_mode), 2), dtype=np.float32)
+                            )
                 kpss = np.array(kpss_list, dtype=object)
 
         if (
