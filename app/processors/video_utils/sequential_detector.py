@@ -316,18 +316,26 @@ class SequentialDetector:
             has_valid_203 = False
 
             if requires_203:
-                _, lm_203, _ = self.main_window.models_processor.run_detect_landmark(
-                    frame_tensor,
-                    current_bbox,
-                    current_kps5,
-                    detect_mode="203",
-                    score=0.5,
-                    use_mean_eyes=control.get("LandmarkMeanEyesToggle", False),
-                    from_points=True,  # STRICTLY REQUIRED FOR INTERNAL ALIGNMENT
+                lm_203_5, lm_203, _ = (
+                    self.main_window.models_processor.run_detect_landmark(
+                        frame_tensor,
+                        current_bbox,
+                        current_kps5,
+                        detect_mode="203",
+                        score=0.5,
+                        use_mean_eyes=control.get("LandmarkMeanEyesToggle", False),
+                        from_points=True,  # STRICTLY REQUIRED FOR INTERNAL ALIGNMENT
+                    )
                 )
                 if len(lm_203) > 0:
                     kps_203_local = lm_203
                     has_valid_203 = True
+
+                    # If 203 was extracted for fallback, but the user ALSO selected 203
+                    # as their primary UI model, update the Swapper's 5 points immediately.
+                    if landmark_mode == "203" and len(lm_203_5) > 0:
+                        filtered_kpss_5[i] = lm_203_5
+
                 filtered_kpss_203.append(kps_203_local)
 
             # FW-LOGIC-FIX 2: Extract standard dense landmarks (68, 203 or 478 depending on UI selection)
@@ -342,8 +350,9 @@ class SequentialDetector:
                     and from_points
                 ):
                     kps_standard = kps_203_local.copy()
+                    # (filtered_kpss_5[i] is already updated in the block above)
                 else:
-                    _, lm_kpss, _ = (
+                    lm_std_5, lm_kpss, _ = (
                         self.main_window.models_processor.run_detect_landmark(
                             frame_tensor,
                             current_bbox,
@@ -356,6 +365,9 @@ class SequentialDetector:
                     )
                     if len(lm_kpss) > 0:
                         kps_standard = lm_kpss
+                        # Sync the 5-point array with the refined outputs
+                        if len(lm_std_5) > 0:
+                            filtered_kpss_5[i] = lm_std_5
 
             filtered_kpss.append(kps_standard)
 
