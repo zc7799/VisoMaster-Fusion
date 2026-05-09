@@ -17,7 +17,7 @@ The project builds on the original VisoMaster work by **@argenspin** and **@Aluc
 
 ## 🔗 Quick Links
 
-- [Download Portable Launcher](https://github.com/VisoMasterFusion/VisoMaster-Fusion/releases/download/v2.0.0/start_portable.bat)
+- [Download Portable Launcher](https://github.com/VisoMasterFusion/VisoMaster-Fusion/releases/latest/download/Start_Portable.bat)
 - [Quick Start Guide](./docs/quickstart.md)
 - [User Manual](./docs/user_manual.md)
 - [Join Discord](https://discord.gg/5rx4SQuDbp)
@@ -27,29 +27,10 @@ The project builds on the original VisoMaster work by **@argenspin** and **@Aluc
 Most users should use the portable launcher:
 
 1. Create a new folder where you want VisoMaster Fusion to live.
-2. Download **only** `Start_Portable.bat` from the `v2.0.0` release.
+2. Download **only** `Start_Portable.bat` from latest release.
 3. Put `Start_Portable.bat` in the new folder and run it.
 
 The first launch downloads the portable runtime, dependencies, FFmpeg, and model files. After setup, always start VisoMaster Fusion with `Start_Portable.bat`.
-
-## ✨ What's New in 2.0.0
-
-VisoMaster Fusion 2.0.0 is a major update focused on faster GPU performance, more stable face tracking, better video review tools, expanded VR180 support, improved restoration controls, and a more polished UI.
-
-- Updated the GPU runtime stack for CUDA 12.9, with newer PyTorch, ONNX Runtime, TensorRT, and cuDNN support.
-- Improved TensorRT handling, engine caching, model loading, fallback behavior, and FP16 inference across more models.
-- Added ByteTrack face tracking for more stable identities across motion, occlusion, cuts, and multi-face scenes.
-- Added video issue review tools for scanning problem frames, jumping between issues, dropping/restoring frames, and excluding dropped frames from render output.
-- Expanded VR180 processing with single-eye mode, tiled face detection, adjustable crop FOV, selectable crop resolution, and stitching/detection fixes.
-- Added Face Re-Aging controls and mouth-action driven auto mouth expression controls.
-- Expanded Face Expression Restorer with simple/advanced modes, regional controls, gaze/lid tuning, normalization, and micro-expression settings.
-- Improved mouth masking, blending, denoising, output handling, recording, batch processing, and Job Manager stability.
-- Added global input resize and improved output location controls for more flexible image and video workflows.
-- Refined the interface with collapsible parameter sections, Theatre Mode improvements, layout restore fixes, and new themes.
-- Added ONNX model optimization tools through the launcher.
-- Added new documentation, including a Quick Start Guide and expanded User Manual.
-- Added a broad pytest-based test suite.
-- Fixed many issues across performance, caching, playback, audio sync, VR180, detection/tracking, and UI.
 
 ## 🎛️ Feature Highlights
 
