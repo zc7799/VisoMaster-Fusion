@@ -4204,6 +4204,12 @@ class FrameWorker(threading.Thread):
             _ratio, _alpha, _threshold, single_frame_mode=_single_frame_mode
         )
 
+        _exclude_upper_teeth = bool(
+            params.get("AutoMouthExcludeUpperTeethToggle", False)
+        )
+        _was_auto_active = bool(getattr(target_fb, "_auto_mouth_prev_active", False))
+        target_fb._auto_mouth_prev_active = _auto_active
+
         if not _auto_active:
             return params
 
@@ -4219,7 +4225,13 @@ class FrameWorker(threading.Thread):
         _strength = _base_strength * _proportion
 
         # Skip entirely when strength is negligible — avoids a full warp-decode cycle.
+        # Still apply FaceParser overrides (teeth exclusion) even at low strength.
         if _strength < 0.01:
+            if _exclude_upper_teeth:
+                _p = dict(params)
+                _p["FaceParserEnableToggle"] = True
+                _p["AutoMouthUpperTeethExcludeActive"] = True
+                return _p
             return params
 
         _p = dict(params)
@@ -4228,11 +4240,12 @@ class FrameWorker(threading.Thread):
         _mouth_val = int(params.get("AutoMouthMouthParserSlider", 1))
         _upper_val = int(params.get("AutoMouthUpperLipParserSlider", 3))
         _lower_val = int(params.get("AutoMouthLowerLipParserSlider", 17))
-        if _mouth_val > 0 or _upper_val > 0 or _lower_val > 0:
+        if _mouth_val > 0 or _upper_val > 0 or _lower_val > 0 or _exclude_upper_teeth:
             _p["FaceParserEnableToggle"] = True
         _p["MouthParserSlider"] = _mouth_val
         _p["UpperLipParserSlider"] = _upper_val
         _p["LowerLipParserSlider"] = _lower_val
+        _p["AutoMouthUpperTeethExcludeActive"] = _exclude_upper_teeth
 
         if _restore_mode == "Face Parser Only":
             # Mask-only mode: do not touch the expression restorer.
@@ -4679,6 +4692,8 @@ class FrameWorker(threading.Thread):
 
         FaceParser_mask = None
         mouth_512 = None
+        mouth_debug_512 = None
+        mouth_debug_teeth_512 = None
         inner_mouth_protection_512 = None
 
         if need_any_parser:
@@ -4693,6 +4708,8 @@ class FrameWorker(threading.Thread):
 
             texture_exclude_512 = out.get("texture_mask", texture_exclude_512)
             mouth_512 = out.get("mouth", None)
+            mouth_debug_512 = out.get("mouth_debug", None)
+            mouth_debug_teeth_512 = out.get("mouth_debug_teeth", None)
             inner_mouth_protection_512 = out.get("inner_mouth_protection", None)
 
         if FaceParser_mask is not None:
@@ -5537,6 +5554,8 @@ class FrameWorker(threading.Thread):
             )
 
             FaceParser_mask = out.get("FaceParser_mask", None)
+            mouth_debug_512 = out.get("mouth_debug", mouth_debug_512)
+            mouth_debug_teeth_512 = out.get("mouth_debug_teeth", mouth_debug_teeth_512)
 
             if FaceParser_mask is not None:
                 if FaceParser_mask.shape[-1] != swap_mask.shape[-1]:
@@ -5729,6 +5748,7 @@ class FrameWorker(threading.Thread):
             if swap_mask_clone is not None:
                 if swap_mask_clone.shape[-1] != 512:
                     swap_mask_clone = t512_mask(swap_mask_clone)
+
                 swap_mask_clone = torch.sub(1, swap_mask_clone)
                 swap_mask_clone = torch.cat(
                     (swap_mask_clone, swap_mask_clone, swap_mask_clone), 0
@@ -5775,6 +5795,32 @@ class FrameWorker(threading.Thread):
         img_float = swap_full + (img_float * swap_mask_minus)
 
         img = img_float.clamp_(0, 255).type(torch.uint8)
+
+        # --- DEBUG: Draw mouth-region contours on full-frame preview ---
+        # Colors: mouth(11+12+13)=green, teeth-keep=cyan.
+        if parameters.get("AutoMouthShowDebugOutlineToggle", False):
+            _debug_layers = [
+                (mouth_debug_512,       [  0, 255,   0]),  # mouth region: green
+                (mouth_debug_teeth_512, [  0, 255, 255]),  # teeth keep:   cyan
+            ]
+            for _mask_512, _color in _debug_layers:
+                if _mask_512 is None:
+                    continue
+                _mf = kgm.warp_affine(
+                    _mask_512.unsqueeze(0).unsqueeze(0).float(),
+                    M_inv,
+                    dsize=dsize,
+                    mode="bilinear",
+                    padding_mode="zeros",
+                    align_corners=True,
+                ).squeeze(0).squeeze(0)
+                _bin = (_mf > 0.5).float().unsqueeze(0).unsqueeze(0)
+                _dil = F.max_pool2d(_bin, kernel_size=3, stride=1, padding=1)
+                _ero = -F.max_pool2d(-_bin, kernel_size=3, stride=1, padding=1)
+                _edge = (_dil - _ero).squeeze(0).squeeze(0) > 0.0
+                img[0][_edge] = _color[0]
+                img[1][_edge] = _color[1]
+                img[2][_edge] = _color[2]
 
         return img, original_face_512_clone, swap_mask_clone
 

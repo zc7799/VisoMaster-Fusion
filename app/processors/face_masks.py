@@ -650,6 +650,13 @@ class FaceMasks:
                 resize_to_target(m.unsqueeze(0)).clamp(0, 1).squeeze()
             )
 
+        # Debug mouth-region mask (inner mouth + lips), used only for preview contour.
+        if labels_swap is not None:
+            mouth_debug = self._mask_from_labels_lut(labels_swap, [11, 12, 13])
+            result["mouth_debug"] = (
+                resize_to_target(mouth_debug.unsqueeze(0)).clamp(0, 1).squeeze()
+            )
+
         # ---------- 2. MOUTH MASK (Grouped Optimization) ----------
         if need_parser_mouth:
             mouth = torch.zeros((512, 512), device=device, dtype=torch.float32)
@@ -693,6 +700,19 @@ class FaceMasks:
                 17: "HairParserSlider",
             }
             mouth_inside = parameters.get("MouthParserInsideToggle", False)
+            upper_teeth_keep_mask = None
+            if (
+                parameters.get("AutoMouthUpperTeethExcludeActive", False)
+                and labels_swap is not None
+            ):
+                upper_teeth_keep_mask = self._build_upper_teeth_keep_mask(
+                    labels_swap, swap_restorecalc
+                )
+
+            if upper_teeth_keep_mask is not None:
+                result["mouth_debug_teeth"] = (
+                    resize_to_target(upper_teeth_keep_mask.unsqueeze(0)).clamp(0, 1).squeeze()
+                )
 
             for cls, pname in face_classes.items():
                 val = int(parameters.get(pname, 0))
@@ -716,7 +736,27 @@ class FaceMasks:
                         comb = torch.maximum(m1, m2)
                 else:
                     comb = m1
+
+                if upper_teeth_keep_mask is not None and 11 in classes:
+                    comb = comb * (1.0 - upper_teeth_keep_mask)
+
                 fp = torch.maximum(fp, comb)
+
+            # Enforce keep mask after all classes so dilated lips cannot
+            # reclaim the teeth area.
+            if upper_teeth_keep_mask is not None:
+                fp = fp * (1.0 - upper_teeth_keep_mask)
+
+            # Recompute mouth-only dilated mask to reflect actual slider values in debug outline.
+            _fp_mouth = torch.zeros((512, 512), device=device, dtype=torch.float32)
+            for _cls, _pname in [(11, "MouthParserSlider"), (12, "UpperLipParserSlider"), (13, "LowerLipParserSlider")]:
+                _val = int(parameters.get(_pname, 0))
+                if _val > 0:
+                    _m = self._mask_from_labels_lut(labels_swap, [_cls])
+                    _m = self._dilate_binary(_m, _val, mode)
+                    _fp_mouth = torch.maximum(_fp_mouth, _m)
+            if _fp_mouth.sum() > 0:
+                result["mouth_debug"] = resize_to_target(_fp_mouth.unsqueeze(0)).clamp(0, 1).squeeze()
 
             if parameters.get("FaceBlurParserSlider", 0) > 0:
                 b = parameters["FaceBlurParserSlider"]
@@ -876,6 +916,51 @@ class FaceMasks:
         # FM-08: clamp labels to valid LUT range to prevent out-of-bounds indexing
         labels_safe = labels.clamp(0, 18)
         return lut[labels_safe]
+
+    def _build_upper_teeth_keep_mask(
+        self,
+        labels_swap: torch.Tensor,
+        swap_restorecalc: torch.Tensor,
+    ) -> torch.Tensor | None:
+        """Builds a soft keep-mask for upper teeth based on brightness."""
+        inner_swap = (labels_swap == 11).float()
+        if inner_swap.sum() < 16:
+            return None
+
+        y_idx, _ = torch.where(inner_swap > 0.5)
+        if y_idx.numel() == 0:
+            return None
+
+        y_min = int(y_idx.min().item())
+        y_max = int(y_idx.max().item())
+        mouth_h = max(1, y_max - y_min + 1)
+
+        H = labels_swap.shape[0]
+        device = labels_swap.device
+        y_grid = torch.arange(H, device=device).view(-1, 1)
+
+        # Detect bright teeth core in top 35 % of inner-mouth.
+        top_limit = y_min + int(max(2, mouth_h * 0.35))
+        top_band = (y_grid <= top_limit).expand(H, labels_swap.shape[1])
+        bright_map = swap_restorecalc.float().div(255.0).mean(dim=0)
+        keep_core = ((inner_swap > 0.5) & top_band & (bright_map >= 0.50)).float()
+        if keep_core.sum() == 0:
+            return None
+
+        # Find the widest row in keep_core; hard-fill inner_swap upward from there
+        # to close the dark gap between teeth surface and the cavity boundary.
+        widest_row = int(keep_core.sum(dim=1).argmax().item())
+        gap_fill = ((inner_swap > 0.5) & (y_grid < widest_row).expand_as(inner_swap)).float()
+        keep = torch.maximum(keep_core, gap_fill)
+
+        # Dilate vertically ±2 rows to cover dark edge pixels at the bottom of
+        # the teeth, then clip to inner_swap so we never bleed into tongue rows.
+        keep = F.max_pool2d(
+            keep.unsqueeze(0).unsqueeze(0), kernel_size=(5, 1), stride=1, padding=(2, 0)
+        ).squeeze(0).squeeze(0)
+        keep = torch.minimum(keep, inner_swap)
+
+        return keep
 
     # --- Occluder & XSeg ---
 

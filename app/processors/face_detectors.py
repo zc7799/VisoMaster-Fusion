@@ -560,7 +560,9 @@ class FaceDetectors:
         args.update(kwargs)
 
         if detect_mode in ["RetinaFace", "SCRFD"]:
-            args["input_size"] = input_size
+            args["input_size"] = self._resolve_detector_input_size(
+                detect_mode, input_size, ort_session
+            )
 
         # Run the detector — returns (det, kpss_5, kpss, det_scores)
         det, kpss_5, kpss, det_scores = detection_function(**args)

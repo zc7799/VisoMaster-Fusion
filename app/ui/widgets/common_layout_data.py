@@ -759,6 +759,29 @@ COMMON_LAYOUT_DATA: Any = {
                 "lp_retarget_lip (Simple/fallback)."
             ),
         },
+        "AutoMouthExcludeUpperTeethToggle": {
+            "level": 2,
+            "label": "Exclude Upper Teeth Area",
+            "default": False,
+            "parentToggle": "AutoMouthExpressionEnableToggle",
+            "requiredToggleValue": True,
+            "help": (
+                "When auto-mouth is active, trims the top part of the inner-mouth "
+                "face-parser mask to keep swapped upper teeth visible while preserving "
+                "original inner-mouth content like tongue/cavity."
+            ),
+        },
+        "AutoMouthShowDebugOutlineToggle": {
+            "level": 2,
+            "label": "Show Mouth Region Outline",
+            "default": False,
+            "parentToggle": "AutoMouthExpressionEnableToggle",
+            "requiredToggleValue": True,
+            "help": (
+                "Draw a green outline around the mouth region on the preview frame "
+                "for debugging. Only visible when Auto Mouth Expression is active."
+            ),
+        },
         "AutoMouthMouthParserSlider": {
             "level": 2,
             "label": "Mouth Parser",
@@ -794,7 +817,7 @@ COMMON_LAYOUT_DATA: Any = {
             "label": "Lower Lip Parser",
             "min_value": "0",
             "max_value": "30",
-            "default": "17",
+            "default": "8",
             "step": 1,
             "parentToggle": "AutoMouthExpressionEnableToggle",
             "requiredToggleValue": True,
