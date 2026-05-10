@@ -278,15 +278,19 @@ class FaceMasks:
         Creates an aligned mouth overlay from the original image to the swap image.
         Strictly limited to the INNER mouth (class 11) to avoid overriding swapped lips.
         """
-        inner_orig = labels_orig == 11
+        # Cleared original mouth from obstacle
+        clear_mask = self._get_obstacle_mask(img_orig, parameters)
+        inner_orig = (labels_orig == 11) & clear_mask
         inner_swap = labels_swap == 11
 
         # We strictly require the inner mouth.
-        # If the mouth is closed, we cannot restore original teeth/tongue.
+        # If the mouth is closed (or completely covered), we cannot restore original teeth/tongue.
         if inner_orig.sum() == 0 or inner_swap.sum() == 0:
             return None, None
 
-        mouth_orig = (labels_orig == 11) | (labels_orig == 12) | (labels_orig == 13)
+        mouth_orig = (
+            (labels_orig == 11) | (labels_orig == 12) | (labels_orig == 13)
+        ) & clear_mask
         mouth_swap = (labels_swap == 11) | (labels_swap == 12) | (labels_swap == 13)
 
         enhanced_img_orig = img_orig.clone()
@@ -482,6 +486,63 @@ class FaceMasks:
             return self._enhance_and_align_swapped_mouth(
                 swap_img, labels_swap, parameters
             )
+
+    def _get_obstacle_mask(
+        self, img_512: torch.Tensor, parameters: dict
+    ) -> torch.Tensor:
+        """
+        Executes the Occluder and/or XSeg models on the original image to identify obstacles (e.g., hands, microphones).
+        Returns a boolean mask (512x512) where True = Clear area (face), False = Obstacle.
+        """
+        device = img_512.device
+
+        need_occluder = parameters.get("OccluderEnableToggle", False)
+        need_xseg = parameters.get("DFLXSegEnableToggle", False)
+
+        # Early exit: If no occlusion models are enabled, allocate and return a full clear mask.
+        # This saves VRAM allocation and prevents unnecessary tensor creation when unused.
+        if not need_occluder and not need_xseg:
+            return torch.ones((512, 512), dtype=torch.bool, device=device)
+
+        # Downscale once to 256x256 since all occlusion models operate at this resolution.
+        img_256 = v2.functional.resize(img_512, [256, 256], antialias=True)
+
+        # We will combine masks at 256x256 first.
+        # Doing boolean math at 256x256 processes 4x fewer pixels than at 512x512.
+        combined_mask_256 = None
+
+        if need_occluder:
+            # apply_occlusion returns 1 for Face, 0 for Obstacle. We keep areas > 0.5.
+            occ_mask = self.apply_occlusion(img_256, amount=1, parameters=parameters)
+            combined_mask_256 = (occ_mask > 0.5).squeeze(0)
+
+        if need_xseg:
+            # Dummy mouth in 3D [1, 256, 256] shape to prevent PyTorch dimension crashes
+            dummy_mouth = torch.zeros((1, 256, 256), device=device)
+
+            # apply_dfl_xseg INVERTS its mask internally (outpred = 1.0 - outpred).
+            # It returns 1 for Obstacle/Background and 0 for Face. We keep areas < 0.5.
+            xseg_mask, _, _, _ = self.apply_dfl_xseg(
+                img_256, amount=1, mouth=dummy_mouth, parameters=parameters
+            )
+            xseg_bool_mask = (xseg_mask < 0.5).squeeze(0)
+
+            # Combine with occluder mask if it exists, otherwise initialize it
+            if combined_mask_256 is None:
+                combined_mask_256 = xseg_bool_mask
+            else:
+                combined_mask_256 = combined_mask_256 & xseg_bool_mask
+        assert combined_mask_256 is not None
+        # Upscale the final combined boolean mask back to 512x512 in one single operation.
+        # NEAREST interpolation is essential here to maintain boolean values (True/False).
+        # We unsqueeze(0) to satisfy torchvision v2 requirements (expects C, H, W) and squeeze(0) after.
+        final_mask_512 = v2.functional.resize(
+            combined_mask_256.unsqueeze(0),
+            [512, 512],
+            interpolation=v2.InterpolationMode.NEAREST,
+        ).squeeze(0)
+
+        return final_mask_512
 
     # --- Main Mask Processing Pipeline ---
 

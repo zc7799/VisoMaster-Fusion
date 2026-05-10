@@ -388,6 +388,7 @@ class SequentialDetector:
         # Cleanup VRAM
         if owns_frame_tensor:
             del frame_tensor
+            frame_tensor = None
 
         # Safely copy arrays before returning to prevent memory corruption when the
         # arrays are accessed by independent worker threads.

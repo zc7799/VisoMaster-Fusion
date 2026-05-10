@@ -1077,10 +1077,9 @@ def keypoints_adjustments(
 ) -> np.ndarray:
     """
     Adjusts facial keypoints for morphing and manual alignments.
-    Uses a Local Anisotropic Alignment strategy. This separates horizontal (Yaw)
-    and vertical (Pitch) perspective compression by flat-rotating the face,
-    scaling axes independently, and rotating back. It perfectly preserves
-    inter-ocular distance while allowing jaw compression.
+    Uses a Local Anisotropic Alignment strategy based on the eye-line.
+    Includes a safety clamp to prevent extreme axial collapse (the 'small face' bug)
+    while allowing enough natural perspective compression to prevent shoulder-bleed.
     """
     kps_5_adj = kps_5.copy()
 
@@ -1099,8 +1098,7 @@ def keypoints_adjustments(
                 tgt_centered = kps_5_adj - tgt_centroid
                 src_centered = source_kps - src_centroid
 
-                # 2. Find Roll Angles based strictly on the eyes (Indices 0 and 1)
-                # This gives us the true intrinsic tilt axis of the face
+                # 2. Find Roll Angles based strictly on the eyes
                 angle_tgt = np.arctan2(
                     kps_5_adj[1, 1] - kps_5_adj[0, 1], kps_5_adj[1, 0] - kps_5_adj[0, 0]
                 )
@@ -1119,8 +1117,6 @@ def keypoints_adjustments(
                 src_flat = src_centered @ R_flat_src.T
 
                 # 4. Local Anisotropic Scale (Independent X and Y)
-                # X std-dev is primarily dictated by eye distance (Width).
-                # Y std-dev is primarily dictated by eye-to-mouth distance (Height).
                 eps = 1e-6
                 std_tgt = np.std(tgt_flat, axis=0) + eps
                 std_src = np.std(src_flat, axis=0) + eps
@@ -1128,8 +1124,15 @@ def keypoints_adjustments(
                 scale_x = std_tgt[0] / std_src[0]
                 scale_y = std_tgt[1] / std_src[1]
 
+                # Calculate the average scale to get a baseline reference for the overall face size.
+                base_scale = (scale_x + scale_y) / 2.0
+
+                # We allow the axis to compress (down to 30% of the baseline scale)
+                # However, we prevent it from dropping below this threshold, avoiding the "miniature face" bug.
+                scale_x = np.clip(scale_x, base_scale * 0.3, base_scale * 2.5)
+                scale_y = np.clip(scale_y, base_scale * 0.3, base_scale * 2.5)
+
                 # 5. Apply Independent Scaling
-                # If target looks down -> scale_y compresses, scale_x is kept intact!
                 src_flat_scaled = src_flat * np.array([scale_x, scale_y])
 
                 # 6. Rotate back to the Target's original Roll angle

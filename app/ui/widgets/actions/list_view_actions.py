@@ -478,9 +478,7 @@ def filter_target_videos(main_window):
 
 
 @QtCore.Slot()
-def load_target_webcams(
-    main_window: "MainWindow", *args, **kwargs
-):
+def load_target_webcams(main_window: "MainWindow", *args, **kwargs):
     from app.ui.widgets.actions import video_control_actions
 
     if video_control_actions.is_issue_scan_active(main_window):

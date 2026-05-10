@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QPushButton
 import cv2
 import numpy as np
 import torch
+import gc
 
 import app.ui.widgets.actions.common_actions as common_widget_actions
 from app.ui.widgets.actions import video_control_actions
@@ -955,6 +956,13 @@ class TargetFaceCardButton(CardButton):
         if main_window.selected_target_face_id == self.face_id:
             main_window.current_kv_tensors_map = self.assigned_kv_map
 
+        # Dirty Flag
+        if (
+            hasattr(self.main_window, "video_processor")
+            and self.main_window.video_processor
+        ):
+            self.main_window.video_processor.ui_state_is_dirty = True
+
     def create_context_menu(self):
         # create context menu
         from app.ui.widgets.actions import list_view_actions
@@ -1102,6 +1110,9 @@ class TargetFaceCardButton(CardButton):
         self.assigned_merged_embeddings.clear()
 
         self.deleteLater()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def get_display_label(self) -> str:
         item_position = self.get_item_position()
@@ -1246,6 +1257,10 @@ class InputFaceCardButton(CardButton):
             if not self.isChecked():
                 cur_selected_target_face_button.assigned_input_faces.pop(self.face_id)
             cur_selected_target_face_button.calculate_assigned_input_embedding()
+            if not self.isChecked():
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
         else:
             if (
                 not QtWidgets.QApplication.keyboardModifiers()
@@ -1570,6 +1585,10 @@ class EmbeddingCardButton(CardButton):
                     self.embedding_id
                 )
             cur_selected_target_face_button.calculate_assigned_input_embedding()
+            if not self.isChecked():
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
         else:
             if (
                 not QtWidgets.QApplication.keyboardModifiers()
