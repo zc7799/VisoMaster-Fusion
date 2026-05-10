@@ -13,47 +13,102 @@ from app.processors.models_data import models_dir
 from app.processors.utils import faceutil
 
 
-def _kps5_is_degenerate(kps5) -> bool:
-    """Return True when the 5 keypoints are too collinear to define a stable
-    affine warp.
+import numpy as np
 
-    With ``from_points=True``, landmark detectors warp the source crop using a
-    5-point similarity transform (``warp_face_by_face_landmark_5``). For full
-    profile / extreme-yaw faces the 5 points (left eye, right eye, nose, two
-    mouth corners) are nearly collinear or have an occluded eye reflected onto
-    the visible side. The resulting warp is degenerate — landmarks come back
-    in wildly wrong positions ("eye sideways, mouth near the ear" symptom).
-
-    Detection: if the height of the triangle (left_eye, right_eye, nose),
-    measured as area÷base, is small relative to the eye-distance (< 10%),
-    treat as degenerate. The caller should fall back to the bbox-based warp
-    path (``from_points=False``).
-
-    Returns True when ``kps5`` is None, has fewer than 5 points, or is
-    geometrically degenerate.
+def _kps5_is_degenerate(kps5: np.ndarray) -> bool:
     """
-    if kps5 is None:
+    Detects if the 5 keypoints form a degenerate geometry (extreme profile or severe pitch)
+    that would cause a 5-point affine warp matrix to collapse or produce distorted "monster" faces.
+    
+    EVOLUTION & VIDEO OPTIMIZATION:
+    Earlier versions relied on rigid thresholds or triangle areas, which failed because AI models
+    often "hallucinate" occluded eyes on profiles. This version uses a Continuous Elliptical 
+    Deformation Energy model based on the nose's deviation from the face's central axis.
+    Tolerances are deliberately relaxed to prevent temporal flickering (jitter) during video 
+    playback. It only triggers a fallback to bounding-box on absolute worst-case scenarios.
+
+    HOW TO TUNE TOLERANCES:
+    Do NOT change the `> 1.0` cutoff (it represents the exact boundary of the safe 3D sphere).
+    Instead, adjust the `tol_` variables:
+      - tol_x (Yaw): Increase to allow more extreme side-profiles before fallback.
+      - tol_y (Pitch UP, dev_y_raw < 0): Increase to allow the head to tilt further back 
+        (nose crossing the eye line) before fallback.
+      - tol_y (Pitch DOWN, dev_y_raw >= 0): Increase to allow the head to tilt further forward 
+        (nose dropping below the mouth) before fallback.
+    """
+    if kps5 is None or len(kps5) < 5:
         return True
 
-    # Safely convert PyTorch tensors (especially on CUDA) to numpy arrays.
-    if torch.is_tensor(kps5):
-        kps5 = kps5.detach().cpu().numpy()
+    # 1. Extract Keypoints
+    le = kps5[0]      # Left eye
+    re = kps5[1]      # Right eye
+    nose = kps5[2]    # Nose
+    mouth_l = kps5[3] # Left mouth corner
+    mouth_r = kps5[4] # Right mouth corner
 
-    try:
-        kps5 = np.asarray(kps5, dtype=np.float32)
-    except (ValueError, TypeError):
+    # 2. Base Distances
+    eye_dist = np.linalg.norm(le - re)
+    mouth_dist = np.linalg.norm(mouth_l - mouth_r)
+    
+    eye_mid = (le + re) / 2.0
+    mouth_mid = (mouth_l + mouth_r) / 2.0
+    
+    face_axis = mouth_mid - eye_mid
+    axis_length = np.linalg.norm(face_axis)
+
+    # Prevent division by zero on corrupted data
+    if axis_length < 1e-5 or eye_dist < 1e-5:
         return True
-    if kps5.ndim != 2 or kps5.shape[0] < 5:
+
+    # 3. Extreme 2D Compression Failsafe
+    # Only triggers if eyes are literally mashed together (severe profile/squash).
+    if (eye_dist / axis_length) < 0.20:
         return True
-    le, re, nose = kps5[0], kps5[1], kps5[2]
-    eye_vec = re - le
-    eye_dist = float(np.linalg.norm(eye_vec))
-    if eye_dist < 1e-3:
-        return True  # both eyes coincide — definitely degenerate
-    # 2× area of triangle (LE, RE, nose) via cross product magnitude
-    cross = abs(eye_vec[0] * (nose[1] - le[1]) - eye_vec[1] * (nose[0] - le[0]))
-    triangle_h = cross / eye_dist  # perpendicular nose-to-eye-line distance
-    return (triangle_h / eye_dist) < 0.10
+
+    # 4. ELLIPTICAL DEFORMATION ENERGY
+    face_axis_normalized = face_axis / axis_length
+    nose_vector = nose - eye_mid
+    
+    # Y-Axis (Pitch): Projection along the face axis
+    nose_proj_y = np.dot(nose_vector, face_axis_normalized)
+    
+    # Ratio: 0.0 = eye level, 1.0 = mouth level
+    nose_vertical_ratio = nose_proj_y / axis_length
+    
+    # X-Axis (Yaw): Orthogonal distance from the face axis
+    nose_perp = nose_vector - (nose_proj_y * face_axis_normalized)
+    nose_offset = np.linalg.norm(nose_perp)
+
+    # Raw Y-axis deviation (no absolute value, to determine pitch direction)
+    # A standard human nose sits roughly at 55% (0.55) down the eye-mouth axis.
+    dev_y_raw = nose_vertical_ratio - 0.55 
+    
+    # --- ASYMMETRIC VERTICAL TOLERANCES (PITCH) ---
+    if dev_y_raw < 0:
+        # Nose moves UP (Head tilted back). 
+        # tol_y = 0.65 allows the nose to reach or slightly pass the eye line (ratio -0.10) 
+        # without breaking the affine matrix.
+        tol_y = 0.65
+    else:
+        # Nose moves DOWN (Head tilted forward). Geometry remains naturally robust.
+        # tol_y = 0.70 allows the nose to drop WELL BELOW the mouth (up to a ratio of 1.25).
+        tol_y = 0.70
+
+    dev_y = abs(dev_y_raw)
+    dev_x = nose_offset / eye_dist
+
+    # --- HORIZONTAL TOLERANCE (YAW) ---
+    # Kept relatively wide (0.70) to ensure smooth video tracking on 3/4 profiles.
+    tol_x = 0.70 
+    
+    # Deformation Ellipse Equation
+    deformation_energy = (dev_y / tol_y)**2 + (dev_x / tol_x)**2
+
+    # If energy exceeds 1.0, the nose is outside the safe 3D sphere. Geometry is unrecoverable.
+    if deformation_energy > 1.0:
+        return True
+
+    return False
 
 
 class FaceLandmarkDetectors:

@@ -127,6 +127,7 @@ class FrameWorker(threading.Thread):
         # FW-MEM-01: Gabor kernel cache as LRU-bounded OrderedDict
         from collections import OrderedDict as _OrderedDict
 
+        self._gabor_kernels_expanded_cache = _OrderedDict()
         self._gabor_kernels_cache: _OrderedDict = (
             _OrderedDict()
         )  # keyed by (kernel_size,sigma,lambd,gamma,psi,N,device_str)
@@ -335,6 +336,15 @@ class FrameWorker(threading.Thread):
                         except ValueError:
                             # Safe to ignore if queue was cleared externally
                             pass
+                    # --- FIX RAM LEAK: Clear heavy objects while thread sleeps ---
+                    self.frame = None
+                    self.precomputed_bboxes = None
+                    self.precomputed_kpss_5 = None
+                    self.precomputed_kpss = None
+                    self.precomputed_kpss_203 = None
+                    self.parameters = {}
+                    self.local_control_state_from_feeder = {}
+                    task = None
 
         else:
             # --- Single-Frame Mode ---
@@ -3765,44 +3775,44 @@ class FrameWorker(threading.Thread):
                     output = torch.clamp(output, 0, 255)
 
         elif swapper_model == "DeepFaceLive (DFM)" and dfm_model:
-            # --- 1. DFM Resolution Detection (Deep Introspection) ---
-            dfm_res = 256  # Fallback
+            # --- 1. DFM Resolution Detection (CACHED) ---
+            if hasattr(dfm_model, "_cached_dfm_res"):
+                dfm_res = dfm_model._cached_dfm_res
+            else:
+                dfm_res = 256  # Fallback
+                from collections import deque
+                queue = deque([dfm_model])
+                visited = set([id(dfm_model)])
+                found_res = None
 
-            from collections import deque
+                while queue and not found_res:
+                    current = queue.popleft()
+                    if hasattr(current, "get_inputs") and callable(current.get_inputs):
+                        try:
+                            shape = current.get_inputs()[0].shape
+                            for s in shape:
+                                if isinstance(s, int) and s > 32 and s % 16 == 0:
+                                    found_res = s
+                                    break
+                        except Exception:
+                            pass
 
-            queue = deque([dfm_model])
-            visited = set([id(dfm_model)])
-            found_res = None
+                    if not found_res and hasattr(current, "__dict__"):
+                        for k, v in current.__dict__.items():
+                            if id(v) not in visited and not k.startswith("__"):
+                                visited.add(id(v))
+                                queue.append(v)
 
-            while queue and not found_res:
-                current = queue.popleft()
-                if hasattr(current, "get_inputs") and callable(current.get_inputs):
-                    try:
-                        shape = current.get_inputs()[0].shape
-                        for s in shape:
-                            if isinstance(s, int) and s > 32 and s % 16 == 0:
-                                found_res = s
-                                break
-                    except Exception:
-                        pass
-
-                if not found_res and hasattr(current, "__dict__"):
-                    for k, v in current.__dict__.items():
-                        if id(v) not in visited and not k.startswith("__"):
-                            visited.add(id(v))
-                            queue.append(v)
-
-            if found_res:
-                dfm_res = found_res
-            elif hasattr(dfm_model, "_dfm_filename_fallback"):
-                import re
-
-                match = re.search(
-                    r"(128|192|224|256|320|384|448|512)",
-                    dfm_model._dfm_filename_fallback,
-                )
-                if match:
-                    dfm_res = int(match.group(1))
+                if found_res:
+                    dfm_res = found_res
+                elif hasattr(dfm_model, "_dfm_filename_fallback"):
+                    import re
+                    match = re.search(r"(128|192|224|256|320|384|448|512)", dfm_model._dfm_filename_fallback)
+                    if match:
+                        dfm_res = int(match.group(1))
+                
+                # Cache it for all future frames!
+                dfm_model._cached_dfm_res = dfm_res
 
             # --- 2. Strict Resize to preserve uint8 (Fixes CUDA White Square) ---
             if dfm_res != 512:
@@ -5877,22 +5887,19 @@ class FrameWorker(threading.Thread):
             kernel_size, sigma, lambd, gamma, psi, theta_values, image.device
         )  # [N, 1, k, k]
 
-        # FW-PERF-06: cache expanded kernels keyed by (shape, C) to avoid repeat_interleave overhead
-        if not hasattr(self, "_gabor_kernels_cache"):
+        # FW-PERF-06: cache expanded kernels keyed by (shape, C)
+        if not hasattr(self, "_gabor_kernels_expanded_cache"):
             from collections import OrderedDict
-
-            self._gabor_kernels_cache = OrderedDict()
+            self._gabor_kernels_expanded_cache = OrderedDict()
+            
         expand_cache_key = (*kernels.shape, C)
-        if expand_cache_key not in self._gabor_kernels_cache:
-            # FW-MEM-01: bound the LRU cache size
-            MAX_GABOR_CACHE = 16
-            if len(self._gabor_kernels_cache) >= MAX_GABOR_CACHE:
-                self._gabor_kernels_cache.popitem(last=False)
-            self._gabor_kernels_cache[expand_cache_key] = kernels.repeat_interleave(
-                C, dim=0
-            )
-        # expand to all channels:
-        weight = self._gabor_kernels_cache[expand_cache_key]  # → [N*C, 1, k, k]
+        if expand_cache_key not in self._gabor_kernels_expanded_cache:
+            MAX_GABOR_EXPANDED_CACHE = 16
+            if len(self._gabor_kernels_expanded_cache) >= MAX_GABOR_EXPANDED_CACHE:
+                self._gabor_kernels_expanded_cache.popitem(last=False)
+            self._gabor_kernels_expanded_cache[expand_cache_key] = kernels.repeat_interleave(C, dim=0)
+            
+        weight = self._gabor_kernels_expanded_cache[expand_cache_key]
         out = F.conv2d(
             image,  # [1, C, H, W]
             weight,
