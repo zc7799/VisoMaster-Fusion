@@ -2131,7 +2131,9 @@ class VideoProcessor(QObject):
         # MP-REFRESH: Force a refresh of the current frame to match current UI state.
         # This prevents confusion if parameters were changed but not yet processed
         # by a worker before the manual stop.
-        if self.file_type in ["video", "image"] and not (was_recording_default_style or was_processing_segments):
+        if self.file_type in ["video", "image"] and not (
+            was_recording_default_style or was_processing_segments
+        ):
             print(
                 "[INFO] Stop Processing: Triggering final frame refresh to match UI state."
             )

@@ -487,7 +487,9 @@ class FaceMasks:
                 swap_img, labels_swap, parameters
             )
 
-    def _get_obstacle_mask(self, img_512: torch.Tensor, parameters: dict) -> torch.Tensor:
+    def _get_obstacle_mask(
+        self, img_512: torch.Tensor, parameters: dict
+    ) -> torch.Tensor:
         """
         Executes the Occluder and/or XSeg models on the original image to identify obstacles (e.g., hands, microphones).
         Returns a boolean mask (512x512) where True = Clear area (face), False = Obstacle.
@@ -505,7 +507,7 @@ class FaceMasks:
         # Downscale once to 256x256 since all occlusion models operate at this resolution.
         img_256 = v2.functional.resize(img_512, [256, 256], antialias=True)
 
-        # We will combine masks at 256x256 first. 
+        # We will combine masks at 256x256 first.
         # Doing boolean math at 256x256 processes 4x fewer pixels than at 512x512.
         combined_mask_256 = None
 
@@ -520,7 +522,9 @@ class FaceMasks:
 
             # apply_dfl_xseg INVERTS its mask internally (outpred = 1.0 - outpred).
             # It returns 1 for Obstacle/Background and 0 for Face. We keep areas < 0.5.
-            xseg_mask, _, _, _ = self.apply_dfl_xseg(img_256, amount=1, mouth=dummy_mouth, parameters=parameters)
+            xseg_mask, _, _, _ = self.apply_dfl_xseg(
+                img_256, amount=1, mouth=dummy_mouth, parameters=parameters
+            )
             xseg_bool_mask = (xseg_mask < 0.5).squeeze(0)
 
             # Combine with occluder mask if it exists, otherwise initialize it
@@ -528,14 +532,14 @@ class FaceMasks:
                 combined_mask_256 = xseg_bool_mask
             else:
                 combined_mask_256 = combined_mask_256 & xseg_bool_mask
-
+        assert combined_mask_256 is not None
         # Upscale the final combined boolean mask back to 512x512 in one single operation.
         # NEAREST interpolation is essential here to maintain boolean values (True/False).
         # We unsqueeze(0) to satisfy torchvision v2 requirements (expects C, H, W) and squeeze(0) after.
         final_mask_512 = v2.functional.resize(
-            combined_mask_256.unsqueeze(0), 
-            [512, 512], 
-            interpolation=v2.InterpolationMode.NEAREST
+            combined_mask_256.unsqueeze(0),
+            [512, 512],
+            interpolation=v2.InterpolationMode.NEAREST,
         ).squeeze(0)
 
         return final_mask_512
