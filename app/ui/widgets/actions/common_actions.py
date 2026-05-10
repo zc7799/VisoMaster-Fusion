@@ -88,7 +88,10 @@ def update_control(
     main_window.control[control_name] = control_value
     # Also update the feeder's state if it's running
     # BUG-16 / THREAD-03: feeder_control None check moved inside the lock to prevent TOCTOU race
-    if main_window.video_processor.processing:
+    main_window.control[control_name] = control_value
+    if hasattr(main_window, "video_processor") and main_window.video_processor:
+        # --- DIRTY FLAG ---
+        main_window.video_processor.ui_state_is_dirty = True
         with main_window.video_processor.state_lock:
             # Cast to ControlTypes to satisfy the type checker, as feeder_control is typed
             if main_window.video_processor.feeder_control and control_name in cast(
@@ -160,7 +163,9 @@ def update_parameter(
         main_window.parameters[face_id][parameter_name] = parameter_value
         # Also update the feeder's state if it's running
         # BUG-16 / THREAD-03: feeder_parameters None check moved inside the lock to prevent TOCTOU race
-        if main_window.video_processor.processing:
+        if hasattr(main_window, "video_processor") and main_window.video_processor:
+            # --- DIRTY FLAG ---
+            main_window.video_processor.ui_state_is_dirty = True
             with main_window.video_processor.state_lock:
                 if (
                     main_window.video_processor.feeder_parameters
@@ -270,6 +275,16 @@ def paste_selected_face_parameters(
         return False
 
     main_window.parameters[face_id] = main_window.copied_parameters.copy()
+    # --- DIRTY FLAG ---
+    if hasattr(main_window, "video_processor") and main_window.video_processor:
+        if main_window.video_processor.processing:
+            main_window.video_processor.ui_state_is_dirty = True
+            with main_window.video_processor.state_lock:
+                if main_window.video_processor.feeder_parameters and face_id in main_window.video_processor.feeder_parameters:
+                    import copy
+                    main_window.video_processor.feeder_parameters[face_id] = copy.deepcopy(
+                        main_window.parameters[face_id]
+                    )
     set_widgets_values_using_face_id_parameters(main_window, face_id=face_id)
     return True
 
@@ -287,6 +302,16 @@ def reset_selected_face_parameters(
         return False
 
     main_window.parameters[face_id] = main_window.default_parameters.copy()
+    # --- DIRTY FLAG ---
+    if hasattr(main_window, "video_processor") and main_window.video_processor:
+        if main_window.video_processor.processing:
+            main_window.video_processor.ui_state_is_dirty = True
+            with main_window.video_processor.state_lock:
+                if main_window.video_processor.feeder_parameters and face_id in main_window.video_processor.feeder_parameters:
+                    import copy
+                    main_window.video_processor.feeder_parameters[face_id] = copy.deepcopy(
+                        main_window.parameters[face_id]
+                    )
     set_widgets_values_using_face_id_parameters(main_window, face_id=face_id)
     return True
 

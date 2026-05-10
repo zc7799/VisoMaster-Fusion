@@ -286,6 +286,19 @@ class FaceRestorers:
         # alpha = float(restorer_blend)/100.0
         # outpred = torch.add(torch.mul(outpred, alpha), torch.mul(swapped_face_upscaled, 1-alpha))
 
+        # --- EXPLICIT CLEANUP ---
+        # Explicitly delete local intermediate tensors to free VRAM immediately 
+        # before returning the final image. This keeps the VRAM peak perfectly flat.
+        try:
+            del temp
+            if restorer_det_type in ["Blend", "Reference"]:
+                del M_tensor
+                del img_b
+                del M_inv_tensor
+                del out_b
+        except Exception:
+            pass
+
         return outpred
 
     def run_vae_encoder(
