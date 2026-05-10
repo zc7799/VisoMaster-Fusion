@@ -1261,6 +1261,8 @@ class VideoProcessor(QObject):
             self.main_window, pixmap, frame_number_to_display
         )
 
+        # Notify ModelsProcessor of the frame that was just displayed to trigger pending unloads
+        self.main_window.models_processor.check_deferred_unloads(frame_number_to_display)
         # --- 8. Clean up and Increment ---
         if self.file_type != "webcam":
             # Increment for next frame
@@ -1925,6 +1927,9 @@ class VideoProcessor(QObject):
 
         print("[INFO] Aborting active processing...")
 
+        # Purge pending model unloads
+        self.main_window.models_processor.execute_all_deferred_unloads()
+
         # 1. Reset flags FIRST to stop all loops immediately.
         # VP-29: Set recording=False early to prevent further frames from being
         # dispatched to FFmpeg by concurrent worker threads.
@@ -2106,6 +2111,15 @@ class VideoProcessor(QObject):
             num_frames_processed = 0
 
         self._log_processing_summary(processing_time_sec, num_frames_processed)
+
+        # MP-REFRESH: Force a refresh of the current frame to match current UI state.
+        # This prevents confusion if parameters were changed but not yet processed 
+        # by a worker before the manual stop.
+        if self.file_type in ["video", "image"]:
+            print("[INFO] Stop Processing: Triggering final frame refresh to match UI state.")
+            # We call this asynchronously to let the UI finish its current state cleanup first
+            self.process_current_frame(synchronous=False)
+
         self.processing_stopped_signal.emit()
 
         return True  # Processing was stopped
