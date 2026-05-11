@@ -13,7 +13,7 @@ from app.processors.models_data import models_dir
 from app.processors.utils import faceutil
 
 
-def _kps5_is_degenerate(kps5: np.ndarray) -> bool:
+def _kps5_is_degenerate(kps5: np.ndarray, detect_mode: str = "203") -> bool:
     """
     Detects if the 5 keypoints form a degenerate geometry (extreme profile or severe pitch)
     that would cause a 5-point affine warp matrix to collapse or produce distorted "monster" faces.
@@ -58,8 +58,9 @@ def _kps5_is_degenerate(kps5: np.ndarray) -> bool:
         return True
 
     # 3. Extreme 2D Compression Failsafe
-    # Only triggers if eyes are literally mashed together (severe profile/squash).
-    if (eye_dist / axis_length) < 0.20:
+    # Triggers if eyes are mashed together (severe profile). Slightly stricter for 478.
+    compression_limit = 0.30 if detect_mode == "478" else 0.25
+    if (eye_dist / axis_length) < compression_limit:
         return True
 
     # 4. ELLIPTICAL DEFORMATION ENERGY
@@ -84,24 +85,27 @@ def _kps5_is_degenerate(kps5: np.ndarray) -> bool:
     if dev_y_raw < 0:
         # Nose moves UP (Head tilted back).
         # tol_y = 0.65 allows the nose to reach or slightly pass the eye line (ratio -0.10)
-        # without breaking the affine matrix.
-        tol_y = 0.65
+        # without breaking the affine matrix. Slightly stricter for 478.
+        tol_y = 0.50 if detect_mode == "478" else 0.65
     else:
         # Nose moves DOWN (Head tilted forward). Geometry remains naturally robust.
         # tol_y = 0.70 allows the nose to drop WELL BELOW the mouth (up to a ratio of 1.25).
-        tol_y = 0.70
+        # Slightly stricter for 478.
+        tol_y = 0.55 if detect_mode == "478" else 0.70
 
     dev_y = abs(dev_y_raw)
     dev_x = nose_offset / eye_dist
 
     # --- HORIZONTAL TOLERANCE (YAW) ---
-    # Kept relatively wide (0.70) to ensure smooth video tracking on 3/4 profiles.
-    tol_x = 0.70
+    # Kept relatively wide (0.70) by default to ensure smooth video tracking.
+    # Model '478' is extremely sensitive to affine squashing on profiles. 
+    # We tighten its tolerance to force the BBox fallback earlier.
+    tol_x = 0.40 if detect_mode == "478" else 0.65
 
     # Deformation Ellipse Equation
     deformation_energy = (dev_y / tol_y) ** 2 + (dev_x / tol_x) ** 2
 
-    # If energy exceeds 1.0, the nose is outside the safe 3D sphere. Geometry is unrecoverable.
+    # If energy exceeds 1.0, the nose is outside the safe 3D sphere.
     if deformation_energy > 1.0:
         return True
 
@@ -244,8 +248,16 @@ class FaceLandmarkDetectors:
         # geometry and force the bbox-based warp path instead — it is less
         # accurate on aligned faces but produces sane output for side angles
         # where the keypoint-based warp simply cannot work.
+        is_degenerate = False
+        if det_kpss is not None and len(det_kpss) >= 5:
+            try:
+                is_degenerate = _kps5_is_degenerate(det_kpss, detect_mode=detect_mode)
+            except TypeError:
+                is_degenerate = _kps5_is_degenerate(det_kpss)
+
+        # Fallback to BBox if the face angle is too extreme for the template
         effective_from_points = from_points
-        if from_points and _kps5_is_degenerate(det_kpss):
+        if from_points and is_degenerate:
             effective_from_points = False
 
         # Call the specific detection function with kwargs
