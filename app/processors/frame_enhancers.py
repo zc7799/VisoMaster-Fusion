@@ -79,12 +79,12 @@ class FrameEnhancers:
             )
 
         try:
-            if self.models_processor.device == "cuda":
+            if self.models_processor.device_type == "cuda":
                 torch.cuda.current_stream().synchronize()
 
             ort_session.run_with_iobinding(io_binding)
 
-            if self.models_processor.device == "cuda":
+            if self.models_processor.device_type == "cuda":
                 torch.cuda.current_stream().synchronize()
         finally:
             # Always hide the dialog, even if the run fails
@@ -257,8 +257,8 @@ class FrameEnhancers:
         # Bind input tensor
         io_binding.bind_input(
             name=input_name,
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=image.size(),
             buffer_ptr=image.data_ptr(),
@@ -266,8 +266,8 @@ class FrameEnhancers:
         # Bind output tensor
         io_binding.bind_output(
             name=output_name,
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=output.size(),
             buffer_ptr=output.data_ptr(),

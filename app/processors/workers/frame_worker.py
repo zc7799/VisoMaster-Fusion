@@ -240,7 +240,7 @@ class FrameWorker(threading.Thread):
         self.kernel_sobel_y = self.kernel_sobel_x.transpose(2, 3)
 
         # Do not use local streams here ! Onnxruntime handles independent streams internally for each worker (fixes VRAM explosion)
-        self.worker_stream = None  # (torch.cuda.Stream() if self.models_processor.device == "cuda" else None)
+        self.worker_stream = None  # (torch.cuda.Stream() if self.models_processor.device_type == "cuda" else None)
 
     def set_scaling_transforms(self, control_params):
         """Initializes the torchvision transforms based on user interpolation settings."""
@@ -3416,7 +3416,7 @@ class FrameWorker(threading.Thread):
                         batch_input, latent, batch_output
                     )
 
-                    if self.models_processor.device == "cuda":
+                    if self.models_processor.device_type == "cuda":
                         torch.cuda.current_stream().synchronize()
 
                     # Replace any near-zero output tile with the input tile
@@ -3480,7 +3480,7 @@ class FrameWorker(threading.Thread):
                                 tile_inputs[idx], latent, tile_outputs[idx]
                             )
 
-                    if self.models_processor.device == "cuda":
+                    if self.models_processor.device_type == "cuda":
                         torch.cuda.current_stream().synchronize()
 
                     # --- MODE 2 ---
@@ -3560,7 +3560,7 @@ class FrameWorker(threading.Thread):
                             tile_inputs[idx], latent, tile_outputs[idx], version
                         )
 
-                if self.models_processor.device == "cuda":
+                if self.models_processor.device_type == "cuda":
                     torch.cuda.current_stream().synchronize()
 
                 # --- MODE 2 ---
@@ -3625,7 +3625,7 @@ class FrameWorker(threading.Thread):
                     input_face_disc, latent, swapper_output
                 )
 
-                if self.models_processor.device == "cuda":
+                if self.models_processor.device_type == "cuda":
                     torch.cuda.current_stream().synchronize()
 
                 # FW-BUG-08: use abs().max() instead of sum() for zero-face heuristic
@@ -3679,7 +3679,7 @@ class FrameWorker(threading.Thread):
                     input_face_disc, latent, swapper_output, swapper_model
                 )
 
-                if self.models_processor.device == "cuda":
+                if self.models_processor.device_type == "cuda":
                     torch.cuda.current_stream().synchronize()
 
                 swapper_output = swapper_output[0]
@@ -3742,7 +3742,7 @@ class FrameWorker(threading.Thread):
                     input_face_disc, latent, swapper_output
                 )
 
-                if self.models_processor.device == "cuda":
+                if self.models_processor.device_type == "cuda":
                     torch.cuda.current_stream().synchronize()
 
                 swapper_output = torch.squeeze(swapper_output)
@@ -3834,7 +3834,7 @@ class FrameWorker(threading.Thread):
             # We use the new dfm_inference_lock to ensure thread-safety
             with self.models_processor.dfm_inference_lock:
                 # PRE-SYNC: Ensure GPU input is ready
-                if self.models_processor.device == "cuda":
+                if self.models_processor.device_type == "cuda":
                     torch.cuda.current_stream().synchronize()
 
                 out_celeb, _, _ = dfm_model.convert(

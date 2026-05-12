@@ -31,10 +31,12 @@ def _load_model_bytes_with_shape_inference(model_path: str) -> bytes:
 
 
 class DFMModel:
-    def __init__(self, model_path: str, providers, device="cuda"):
+    def __init__(self, model_path: str, providers, device="cuda", gpu_id=0):
         self._model_path = model_path
         self.providers = providers
         self.device = device
+        self.device_type = device.split(":")[0]
+        self.gpu_id = gpu_id
         self.syncvec = torch.empty((1, 1), dtype=torch.float32, device=device)
 
         # Run ONNX shape inference before session creation so TensorRT can
@@ -104,6 +106,10 @@ class DFMModel:
             # Add other necessary dtype mappings as needed
         }
 
+    @property
+    def binding_device_id(self) -> int:
+        return self.gpu_id if self.device_type != "cpu" else 0
+
     def get_model_path(self):
         return self._model_path
 
@@ -149,8 +155,8 @@ class DFMModel:
         # Bind input image tensor
         io_binding.bind_input(
             name="in_face:0",
-            device_type=self.device,
-            device_id=0,
+            device_type=self.device_type,
+            device_id=self.binding_device_id,
             element_type=np.float32,
             shape=img.shape,
             buffer_ptr=img.data_ptr(),
@@ -163,8 +169,8 @@ class DFMModel:
             )
             io_binding.bind_input(
                 name="morph_value:0",
-                device_type=self.device,
-                device_id=0,
+                device_type=self.device_type,
+                device_id=self.binding_device_id,
                 element_type=np.float32,
                 shape=morph_factor_t.shape,
                 buffer_ptr=morph_factor_t.data_ptr(),
@@ -190,8 +196,8 @@ class DFMModel:
             # Bind the output using ONNX Runtime's io_binding
             io_binding.bind_output(
                 name=output.name,
-                device_type=self.device,
-                device_id=0,
+                device_type=self.device_type,
+                device_id=self.binding_device_id,
                 element_type=self.onnx_to_numpy_dtype[
                     output.type
                 ],  # Use NumPy dtype for element_type
@@ -199,8 +205,10 @@ class DFMModel:
                 buffer_ptr=binding_outputs[idx].data_ptr(),
             )
 
-        if self.device == "cuda":
+        if self.device_type == "cuda":
             torch.cuda.current_stream().synchronize()
+        elif self.device_type != "cpu":
+            self.syncvec.cpu()
         self._sess.run_with_iobinding(io_binding)
 
         # Process outputs (resize, clip channels, and convert back to original dtype)

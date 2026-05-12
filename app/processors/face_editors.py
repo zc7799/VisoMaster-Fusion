@@ -155,8 +155,8 @@ class FaceEditors:
         for name, tensor in inputs.items():
             io_binding.bind_input(
                 name=name,
-                device_type=self.models_processor.device,
-                device_id=0,
+                device_type=self.models_processor.device_type,
+                device_id=self.models_processor.binding_device_id,
                 element_type=np.float32,
                 shape=tensor.size(),
                 buffer_ptr=tensor.data_ptr(),
@@ -166,8 +166,8 @@ class FaceEditors:
         for name, tensor in output_spec.items():
             io_binding.bind_output(
                 name=name,
-                device_type=self.models_processor.device,
-                device_id=0,
+                device_type=self.models_processor.device_type,
+                device_id=self.models_processor.binding_device_id,
                 element_type=np.float32,
                 shape=tensor.size(),
                 buffer_ptr=tensor.data_ptr(),
@@ -185,9 +185,9 @@ class FaceEditors:
         try:
             # PRE-INFERENCE SYNC: Ensure PyTorch has finished preparing the memory
             # before ONNX Runtime starts reading from the IOBinding pointers.
-            if self.models_processor.device == "cuda":
+            if self.models_processor.device_type == "cuda":
                 torch.cuda.current_stream().synchronize()
-            elif self.models_processor.device != "cpu":
+            elif self.models_processor.device_type != "cpu":
                 self.models_processor.syncvec.cpu()
 
             model.run_with_iobinding(io_binding)

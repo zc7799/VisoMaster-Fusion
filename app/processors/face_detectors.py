@@ -456,9 +456,9 @@ class FaceDetectors:
         try:
             # PRE-INFERENCE SYNC: Ensure PyTorch has finished preparing the memory
             # before ONNX Runtime starts reading from the IOBinding pointers.
-            if self.models_processor.device == "cuda":
+            if self.models_processor.device_type == "cuda":
                 torch.cuda.current_stream().synchronize()
-            elif self.models_processor.device != "cpu":
+            elif self.models_processor.device_type != "cpu":
                 self.models_processor.syncvec.cpu()
 
             ort_session.run_with_iobinding(io_binding)
@@ -466,9 +466,9 @@ class FaceDetectors:
             # POST-INFERENCE SYNC : Ensure the GPU has completed all
             # calculations before ONNX Runtime attempts to copy the result back to CPU RAM.
             # Without this, copy_outputs_to_cpu() might grab an incomplete tensor.
-            if self.models_processor.device == "cuda":
+            if self.models_processor.device_type == "cuda":
                 torch.cuda.current_stream().synchronize()
-            elif self.models_processor.device != "cpu":
+            elif self.models_processor.device_type != "cpu":
                 self.models_processor.syncvec.cpu()
 
             net_outs = io_binding.copy_outputs_to_cpu()
@@ -809,8 +809,8 @@ class FaceDetectors:
             io_binding = ort_session.io_binding()
             io_binding.bind_input(
                 name="input.1",
-                device_type=self.models_processor.device,
-                device_id=0,
+                device_type=self.models_processor.device_type,
+                device_id=self.models_processor.binding_device_id,
                 element_type=np.float32,
                 shape=aimg.size(),
                 buffer_ptr=aimg.data_ptr(),
@@ -826,7 +826,7 @@ class FaceDetectors:
                 "477",
                 "500",
             ]:
-                io_binding.bind_output(i, self.models_processor.device)
+                io_binding.bind_output(i, self.models_processor.device_type, self.models_processor.binding_device_id)
             # Run the model with lazy build handling
             net_outs = self._run_model_with_lazy_build_check(
                 model_name, ort_session, io_binding
@@ -999,14 +999,14 @@ class FaceDetectors:
 
             io_binding.bind_input(
                 name=input_name,
-                device_type=self.models_processor.device,
-                device_id=0,
+                device_type=self.models_processor.device_type,
+                device_id=self.models_processor.binding_device_id,
                 element_type=np.float32,
                 shape=aimg.size(),
                 buffer_ptr=aimg.data_ptr(),
             )
             for name in output_names:
-                io_binding.bind_output(name, self.models_processor.device)
+                io_binding.bind_output(name, self.models_processor.device_type, self.models_processor.binding_device_id)
 
             # Run the model with lazy build handling
             net_outs = self._run_model_with_lazy_build_check(
@@ -1182,13 +1182,13 @@ class FaceDetectors:
             io_binding = ort_session.io_binding()
             io_binding.bind_input(
                 name="images",
-                device_type=self.models_processor.device,
-                device_id=0,
+                device_type=self.models_processor.device_type,
+                device_id=self.models_processor.binding_device_id,
                 element_type=np.float32,
                 shape=aimg_prepared.size(),  # Use shape of prepared tensor
                 buffer_ptr=aimg_prepared.data_ptr(),  # Use data_ptr of prepared tensor
             )
-            io_binding.bind_output("output0", self.models_processor.device)
+            io_binding.bind_output("output0", self.models_processor.device_type, self.models_processor.binding_device_id)
             # Run the model with lazy build handling
             net_outs = self._run_model_with_lazy_build_check(
                 model_name, ort_session, io_binding
@@ -1350,14 +1350,14 @@ class FaceDetectors:
 
             io_binding.bind_input(
                 name=input_name,
-                device_type=self.models_processor.device,
-                device_id=0,
+                device_type=self.models_processor.device_type,
+                device_id=self.models_processor.binding_device_id,
                 element_type=np.float32,
                 shape=aimg_prepared.size(),  # Use shape of prepared tensor
                 buffer_ptr=aimg_prepared.data_ptr(),  # Use data_ptr of prepared tensor
             )
             for name in output_names:
-                io_binding.bind_output(name, self.models_processor.device)
+                io_binding.bind_output(name, self.models_processor.device_type, self.models_processor.binding_device_id)
 
             # Run the model with lazy build handling
             net_outs = self._run_model_with_lazy_build_check(

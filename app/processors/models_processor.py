@@ -117,14 +117,21 @@ def _probe_onnx_model_worker(
                 # Use setattr to configure the SessionOptions object
                 setattr(session_options, key, value)
 
+        # Set the CUDA device to match the TRT provider's device_id
+        gpu_id = trt_options.get("device_id", 0)
+        if gpu_id != 0 and torch.cuda.is_available():
+            torch.cuda.set_device(gpu_id)
+
         # Reconstruct the providers tuple
         providers = []
         for p in providers_list:
-            if p == "TensorrtExecutionProvider":
-                # This worker *must* have trt_options to trigger the build
-                providers.append((p, trt_options))
-            else:
+            name = p[0] if isinstance(p, tuple) else p
+            if name == "TensorrtExecutionProvider":
+                providers.append((name, trt_options))
+            elif isinstance(p, tuple) and len(p) > 1:
                 providers.append(p)
+            else:
+                providers.append(name)
 
         print(f"[ONNX Prober]: Attempting to load {os.path.basename(model_path)}...")
         # This line is the one that triggers the build/cache generation
@@ -200,6 +207,7 @@ class ModelsProcessor(QtCore.QObject):
         """
         super().__init__()
         self.main_window = main_window
+        self.gpu_id = getattr(main_window, "gpu_id", 0)
         self.K = K  # Assign the module-level K to an instance attribute
         self.provider_name = "TensorRT"
         # NOTE: internal_deep_copied_kv_map / internal_kv_map_source_filename were
@@ -213,7 +221,10 @@ class ModelsProcessor(QtCore.QObject):
         self.internal_kv_map_source_filename: str | None = None
         self.kv_extractor: Optional[KVExtractor] = None
         self.kv_extraction_lock = threading.Lock()
-        self.device = device
+        self.device = f"{device}:{self.gpu_id}" if device != "cpu" else device
+        self.device_type = device
+        if self.gpu_id != 0 and device != "cpu":
+            torch.cuda.set_device(self.gpu_id)
         self.model_lock = threading.RLock()  # Reentrant lock for model access
 
         self.cuda_graph_capture_lock = threading.Lock()
@@ -224,7 +235,7 @@ class ModelsProcessor(QtCore.QObject):
 
         try:
             # Get total GPU memory in bytes
-            total_vram = torch.cuda.get_device_properties(0).total_memory
+            total_vram = torch.cuda.get_device_properties(self.gpu_id).total_memory
 
             # Safely allocate 40% of total VRAM for TensorRT workspace
             calculated_workspace = int(total_vram * 0.40)
@@ -237,6 +248,7 @@ class ModelsProcessor(QtCore.QObject):
 
         # Default TensorRT options
         self.trt_ep_options = {
+            "device_id": self.gpu_id,
             "trt_engine_cache_enable": True,
             "trt_engine_cache_path": "tensorrt-engines",
             "trt_timing_cache_enable": True,
@@ -252,7 +264,7 @@ class ModelsProcessor(QtCore.QObject):
         self.models_pending_build: set = set()
         self.providers = [
             ("TensorrtExecutionProvider", self.trt_ep_options),
-            ("CUDAExecutionProvider"),
+            ("CUDAExecutionProvider", {"device_id": self.gpu_id}),
             ("CPUExecutionProvider"),
         ]
         self.syncvec = torch.empty((1, 1), dtype=torch.float32, device=self.device)
@@ -511,6 +523,10 @@ class ModelsProcessor(QtCore.QObject):
         self.rgb_to_linear_rgb_converter = None
         self.linear_rgb_to_rgb_converter = None
 
+    @property
+    def binding_device_id(self) -> int:
+        return self.gpu_id if self.device_type != "cpu" else 0
+
     def _check_tensorrt_cache(self, model_name: str, onnx_path: str) -> bool:
         """
         Checks if a valid TensorRT cache (ctx and engine file) exists for the given model.
@@ -638,11 +654,9 @@ class ModelsProcessor(QtCore.QObject):
 
                                 # Use 'spawn' context for CUDA/TRT safety
                                 ctx = multiprocessing.get_context("spawn")
-                                # Use the 'providers' variable
-                                current_providers_list = [
-                                    p[0] if isinstance(p, tuple) else p
-                                    for p in model_providers
-                                ]
+                                # Pass full providers list (with tuples) so the worker
+                                # can reconstruct them with device_id options.
+                                current_providers_list = list(model_providers)
                                 probe_process = ctx.Process(
                                     target=_probe_onnx_model_worker,
                                     args=(
@@ -865,6 +879,7 @@ class ModelsProcessor(QtCore.QObject):
                     self.main_window.dfm_model_manager.get_models_data()[dfm_model],
                     dfm_providers,
                     self.device,
+                    self.gpu_id,
                 )
             except Exception:
                 print(f"[ERROR] Failed to load DFM model {dfm_model}.")
@@ -1171,10 +1186,11 @@ class ModelsProcessor(QtCore.QObject):
                     raise RuntimeError("TensorRT is not installed.")
                 providers = [
                     ("TensorrtExecutionProvider", self.trt_ep_options),
-                    ("CUDAExecutionProvider"),
+                    ("CUDAExecutionProvider", {"device_id": self.gpu_id}),
                     ("CPUExecutionProvider"),
                 ]
-                self.device = "cuda"
+                self.device = f"cuda:{self.gpu_id}"
+                self.device_type = "cuda"
                 if (
                     version.parse(trt.__version__) < version.parse("10.2.0")
                     and provider_name == "TensorRT-Engine"
@@ -1187,9 +1203,11 @@ class ModelsProcessor(QtCore.QObject):
             case "CPU":
                 providers = [("CPUExecutionProvider")]
                 self.device = "cpu"
+                self.device_type = "cpu"
             case "CUDA":
-                providers = [("CUDAExecutionProvider"), ("CPUExecutionProvider")]
-                self.device = "cuda"
+                providers = [("CUDAExecutionProvider", {"device_id": self.gpu_id}), ("CPUExecutionProvider")]
+                self.device = f"cuda:{self.gpu_id}"
+                self.device_type = "cuda"
             case _:
                 # MP-22: raise on unknown provider name
                 raise ValueError(f"Unknown provider: {provider_name}")
@@ -1217,7 +1235,7 @@ class ModelsProcessor(QtCore.QObject):
         """
         # MP-13: use a single nvidia-smi call for both total and free memory
         try:
-            command = "nvidia-smi --query-gpu=memory.total,memory.free --format=csv,noheader,nounits"
+            command = f"nvidia-smi --id={self.gpu_id} --query-gpu=memory.total,memory.free --format=csv,noheader,nounits"
             output = sp.check_output(command.split()).decode("ascii").strip()
             # Output format: "total, free" (one line per GPU)
             first_line = output.split("\n")[0]
@@ -1229,10 +1247,10 @@ class ModelsProcessor(QtCore.QObject):
         except Exception:
             # Fallback to torch.cuda if nvidia-smi is unavailable
             if torch.cuda.is_available():
-                props = torch.cuda.get_device_properties(0)
+                props = torch.cuda.get_device_properties(self.gpu_id)
                 memory_total_val = props.total_memory // (1024 * 1024)
                 memory_free_val = (
-                    props.total_memory - torch.cuda.memory_reserved(0)
+                    props.total_memory - torch.cuda.memory_reserved(self.gpu_id)
                 ) // (1024 * 1024)
                 memory_used = memory_total_val - memory_free_val
                 return memory_used, memory_total_val

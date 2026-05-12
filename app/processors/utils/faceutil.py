@@ -127,8 +127,6 @@ arcface_src_cuda = torch.tensor(
     ],
     dtype=torch.float32,
 )  # Shape: (5, 2)
-if torch.cuda.is_available():
-    arcface_src_cuda = arcface_src_cuda.to("cuda")
 
 # F-09: module-level constant matrices for color-space conversions (avoid re-allocating per call)
 _RGB_TO_YUV = torch.tensor(

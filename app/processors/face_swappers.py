@@ -92,9 +92,9 @@ class FaceSwappers:
         try:
             # ⚠️ This is a critical synchronization point.
             # PRE-INFERENCE SYNC
-            if self.models_processor.device == "cuda":
+            if self.models_processor.device_type == "cuda":
                 torch.cuda.current_stream().synchronize()
-            elif self.models_processor.device != "cpu":
+            elif self.models_processor.device_type != "cpu":
                 # This handles synchronization for other execution providers (e.g., DirectML)
                 self.models_processor.syncvec.cpu()
 
@@ -218,15 +218,15 @@ class FaceSwappers:
         io_binding = ort_session.io_binding()
         io_binding.bind_input(
             name=input_name,
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=img.size(),
             buffer_ptr=img.data_ptr(),
         )
 
         for name in output_names:
-            io_binding.bind_output(name, self.models_processor.device)
+            io_binding.bind_output(name, self.models_processor.device_type, self.models_processor.binding_device_id)
 
         self._run_model_with_lazy_build_check(arcface_model, ort_session, io_binding)
 
@@ -290,13 +290,13 @@ class FaceSwappers:
 
         io_binding.bind_input(
             name="input",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=img.size(),
             buffer_ptr=img.data_ptr(),
         )
-        io_binding.bind_output(name="output", device_type=self.models_processor.device)
+        io_binding.bind_output(name="output", device_type=self.models_processor.device_type, device_id=self.models_processor.binding_device_id)
 
         self._run_model_with_lazy_build_check(model_name, model, io_binding)
 
@@ -335,13 +335,13 @@ class FaceSwappers:
 
         io_binding.bind_input(
             name="input",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=img.size(),
             buffer_ptr=img.data_ptr(),
         )
-        io_binding.bind_output(name="output", device_type=self.models_processor.device)
+        io_binding.bind_output(name="output", device_type=self.models_processor.device_type, device_id=self.models_processor.binding_device_id)
 
         self._run_model_with_lazy_build_check(model_name, model, io_binding)
 
@@ -381,24 +381,24 @@ class FaceSwappers:
         # Hardcoded IO names validated by standard CSCS export
         io_binding.bind_input(
             name="input_1",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 3, 256, 256),
             buffer_ptr=image.data_ptr(),
         )
         io_binding.bind_input(
             name="input_2",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 512),
             buffer_ptr=embedding.data_ptr(),
         )
         io_binding.bind_output(
             name="output",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 3, 256, 256),
             buffer_ptr=output.data_ptr(),
@@ -464,24 +464,24 @@ class FaceSwappers:
 
         io_binding.bind_input(
             name="target",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 3, 128, 128),
             buffer_ptr=image.data_ptr(),
         )
         io_binding.bind_input(
             name="source",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 512),
             buffer_ptr=embedding.data_ptr(),
         )
         io_binding.bind_output(
             name="output",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 3, 128, 128),
             buffer_ptr=output.data_ptr(),
@@ -515,24 +515,24 @@ class FaceSwappers:
             io_binding.clear_binding_outputs()
             io_binding.bind_input(
                 name="target",
-                device_type=self.models_processor.device,
-                device_id=0,
+                device_type=self.models_processor.device_type,
+                device_id=self.models_processor.binding_device_id,
                 element_type=np.float32,
                 shape=(1, 3, 128, 128),
                 buffer_ptr=img.data_ptr(),
             )
             io_binding.bind_input(
                 name="source",
-                device_type=self.models_processor.device,
-                device_id=0,
+                device_type=self.models_processor.device_type,
+                device_id=self.models_processor.binding_device_id,
                 element_type=np.float32,
                 shape=(1, 512),
                 buffer_ptr=emb.data_ptr(),
             )
             io_binding.bind_output(
                 name="output",
-                device_type=self.models_processor.device,
-                device_id=0,
+                device_type=self.models_processor.device_type,
+                device_id=self.models_processor.binding_device_id,
                 element_type=np.float32,
                 shape=(1, 3, 128, 128),
                 buffer_ptr=out.data_ptr(),
@@ -564,24 +564,24 @@ class FaceSwappers:
         io_binding = model.io_binding()
         io_binding.bind_input(
             name="target",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 3, 256, 256),
             buffer_ptr=image.data_ptr(),
         )
         io_binding.bind_input(
             name="source",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 512),
             buffer_ptr=embedding.data_ptr(),
         )
         io_binding.bind_output(
             name="output",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 3, 256, 256),
             buffer_ptr=output.data_ptr(),
@@ -606,24 +606,24 @@ class FaceSwappers:
         io_binding = model.io_binding()
         io_binding.bind_input(
             name="input",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 3, 512, 512),
             buffer_ptr=image.data_ptr(),
         )
         io_binding.bind_input(
             name="onnx::Gemm_1",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 512),
             buffer_ptr=embedding.data_ptr(),
         )
         io_binding.bind_output(
             name="output",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 3, 512, 512),
             buffer_ptr=output.data_ptr(),
@@ -665,24 +665,24 @@ class FaceSwappers:
         io_binding = ghostfaceswap_model.io_binding()
         io_binding.bind_input(
             name="target",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 3, 256, 256),
             buffer_ptr=image.data_ptr(),
         )
         io_binding.bind_input(
             name="source",
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 512),
             buffer_ptr=embedding.data_ptr(),
         )
         io_binding.bind_output(
             name=output_name,
-            device_type=self.models_processor.device,
-            device_id=0,
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
             element_type=np.float32,
             shape=(1, 3, 256, 256),
             buffer_ptr=output.data_ptr(),

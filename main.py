@@ -1,4 +1,5 @@
 import sys
+import argparse
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -39,7 +40,16 @@ def _run_app() -> None:
     import qdarktheme
     from app.ui.core.proxy_style import ProxyStyle
 
-    app = QtWidgets.QApplication(sys.argv)
+    parser = argparse.ArgumentParser(description="VisoMaster")
+    parser.add_argument(
+        "--gpu-id",
+        type=int,
+        default=0,
+        help="CUDA GPU device ID to use (default: 0)",
+    )
+    args, remaining = parser.parse_known_args()
+
+    app = QtWidgets.QApplication(remaining)
     app.setStyle(ProxyStyle())
     with open("app/ui/styles/true_dark_styles.qss", "r") as f:
         _style = f.read()
@@ -51,7 +61,7 @@ def _run_app() -> None:
             + _style
         )
         app.setStyleSheet(_style)
-    window = main_ui.MainWindow()
+    window = main_ui.MainWindow(gpu_id=args.gpu_id)
     window.show()
     app.exec()
 
