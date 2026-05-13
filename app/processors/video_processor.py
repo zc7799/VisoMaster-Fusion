@@ -4355,6 +4355,8 @@ class VideoProcessor(QObject):
                     job_name=job_name,
                     use_job_name_for_output=use_job_name,
                     output_file_name=output_file_name,
+                    save_to_subdirectory=self.main_window.control.get("SaveToSubdirectoryToggle", False),
+                    input_face_path=self.main_window.last_input_media_folder_path,
                 )
 
                 # Add suffix if stopped due to error limit
@@ -5072,6 +5074,8 @@ class VideoProcessor(QObject):
             job_name=job_name,
             use_job_name_for_output=use_job_name,
             output_file_name=output_file_name,
+            save_to_subdirectory=self.main_window.control.get("SaveToSubdirectoryToggle", False),
+            input_face_path=self.main_window.last_input_media_folder_path,
         )
 
         # Add suffix if stopped due to error limit

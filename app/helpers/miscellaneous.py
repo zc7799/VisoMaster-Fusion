@@ -977,6 +977,8 @@ def get_output_file_path(
     job_name: Optional[str] = None,
     use_job_name_for_output: bool = False,
     output_file_name: Optional[str] = None,
+    save_to_subdirectory: bool = False,
+    input_face_path: Optional[str] = None,
 ) -> str:
     """
     Determines the full output path for a processed media file based on a priority system.
@@ -995,6 +997,8 @@ def get_output_file_path(
         job_name (str, optional): The name of the current job, used if `use_job_name_for_output` is True.
         use_job_name_for_output (bool): Flag to indicate if the job name should be used for the output filename.
         output_file_name (str, optional): A specific name for the output file.
+        save_to_subdirectory (bool): Flag to indicate if output should be saved to a subdirectory named after the input face.
+        input_face_path (str, optional): The path of the input face, used to extract face name for subdirectory.
 
     Returns:
         str: The fully constructed, absolute path for the output file.
@@ -1029,7 +1033,15 @@ def get_output_file_path(
 
     # --- Final Path Construction ---
     output_filename = f"{output_base_name}{extension}"
-    output_file_path = os.path.join(output_folder, output_filename)
+
+    # --- Subdirectory Logic ---
+    if save_to_subdirectory and input_face_path:
+        face_folder_name = os.path.basename(input_face_path)
+        subdirectory_path = os.path.join(output_folder, face_folder_name)
+        output_file_path = os.path.join(subdirectory_path, output_filename)
+    else:
+        output_file_path = os.path.join(output_folder, output_filename)
+
     return output_file_path
 
 
