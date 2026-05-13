@@ -683,7 +683,8 @@ def _set_up_panel_context_menu(
 
 @QtCore.Slot()
 def select_input_face_images(
-    main_window: "MainWindow", source_type="folder", folder_name=False, files_list=None
+    #修改-添加查找人脸对话框
+    main_window: "MainWindow", source_type="folder", folder_name=False, files_list=None, skip_dialog=False
 ):
     from app.ui.widgets.actions import video_control_actions
 
@@ -693,12 +694,13 @@ def select_input_face_images(
         return
 
     files_list = files_list or []
-    if source_type == "folder":
+    if source_type == "folder" and not skip_dialog:   #修改-添加查找人脸对话框
         folder_name = QtWidgets.QFileDialog.getExistingDirectory(
             dir=main_window.last_input_media_folder_path
         )
         if not folder_name:
             return
+    if folder_name:  #修改-添加查找人脸对话框
         main_window.inputFacesPathLineEdit.setText(folder_name)
         main_window.inputFacesPathLineEdit.setToolTip(folder_name)
         main_window.last_input_media_folder_path = folder_name
@@ -809,6 +811,35 @@ def open_output_media_folder(main_window: "MainWindow", folder_name: str | None 
         _show_missing_folder_message(main_window, "Output Folder", folder_name)
         return
     _open_folder_in_file_manager(main_window, folder_name)
+
+
+# 修改-添加查找人脸对话框-start
+def show_find_face_dialog(main_window: "MainWindow"):
+    if not main_window.last_input_media_folder_path:
+        QtWidgets.QMessageBox.warning(
+            main_window,
+            "警告",
+            "请先选择一个输入人脸文件夹！",
+        )
+        return
+
+    parent_path = main_window.last_input_media_folder_path
+    parent_path = os.path.dirname(parent_path)
+
+    if not os.path.exists(parent_path):
+        QtWidgets.QMessageBox.warning(
+            main_window,
+            "无法获取上级目录！",
+            main_window,
+        )
+        return
+
+    dialog = widget_components.FindFaceDialog(main_window, parent_path)
+
+    if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+        if dialog.selected_folder:
+            select_input_face_images(main_window, source_type="folder", folder_name=dialog.selected_folder, skip_dialog=True)
+# 修改-添加查找人脸对话框-end
 
 
 def open_target_media_folder(main_window: "MainWindow"):

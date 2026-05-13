@@ -509,16 +509,22 @@ def _load_job_controls_and_state(
     main_window.last_input_media_folder_path = data.get(
         "last_input_media_folder_path", ""
     )
-    main_window.targetVideosPathLineEdit.setText(
-        main_window.last_target_media_folder_path
-    )
-    main_window.targetVideosPathLineEdit.setToolTip(
-        main_window.last_target_media_folder_path
-    )
-    main_window.inputFacesPathLineEdit.setText(main_window.last_input_media_folder_path)
-    main_window.inputFacesPathLineEdit.setToolTip(
-        main_window.last_input_media_folder_path
-    )
+    #修改-路径标签-添加截断显示
+    if main_window.last_target_media_folder_path:
+        main_window.targetVideosPathLineEdit.setText(
+            misc_helpers.truncate_text(main_window.last_target_media_folder_path)
+        )
+        main_window.targetVideosPathLineEdit.setToolTip(
+            main_window.last_target_media_folder_path
+        )
+    #修改-路径标签-end
+    if main_window.last_input_media_folder_path:
+        main_window.inputFacesPathLineEdit.setText(
+            misc_helpers.truncate_text(main_window.last_input_media_folder_path)
+        )
+        main_window.inputFacesPathLineEdit.setToolTip(
+            main_window.last_input_media_folder_path
+        )
     main_window.loaded_embedding_filename = data.get("loaded_embedding_filename", "")
 
     # Update all control widgets in the "Settings" tab
