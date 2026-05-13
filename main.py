@@ -35,7 +35,7 @@ def _run_app() -> None:
     captured by the outer try/except (otherwise a top-level import error would
     bypass the crash-log writer)."""
     from app.ui import main_ui
-    from PySide6 import QtWidgets
+    from PySide6 import QtWidgets, QtCore
 
     import qdarktheme
     from app.ui.core.proxy_style import ProxyStyle
@@ -61,8 +61,16 @@ def _run_app() -> None:
             + _style
         )
         app.setStyleSheet(_style)
+    # 修改-添加中文翻译支持
+    from app.ui.translations import install_translator
+    translator = install_translator(app)
+
     window = main_ui.MainWindow(gpu_id=args.gpu_id)
+
     window.show()
+
+    QtCore.QTimer.singleShot(100, lambda: install_translator(app))
+
     app.exec()
 
 
