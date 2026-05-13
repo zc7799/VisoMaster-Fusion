@@ -218,6 +218,12 @@ SETTINGS_LAYOUT_DATA: Any = {  # noqa: F811
             "default": False,
             "help": "Opens the output folder after recording ends.",
         },
+        "SaveToSubdirectoryToggle": {
+            "level": 1,
+            "label": "Save to Subdirectory",
+            "default": False,
+            "help": "Save video to a subdirectory named after the face in the output folder.",
+        },
         "HDREncodeToggle": {
             "level": 1,
             "label": "HDR Encoding - Use on HDR videos only (CPU)",
