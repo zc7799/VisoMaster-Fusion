@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QPushButton
 import cv2
 import numpy as np
 import torch
+from pypinyin import lazy_pinyin  #修改-添加拼音支持
 import gc
 
 import app.ui.widgets.actions.common_actions as common_widget_actions
@@ -2101,22 +2102,50 @@ class LoadLastWorkspaceDialog(QtWidgets.QDialog):
         self.setWindowTitle("Load Last Workspace")
         self.setWindowIcon(QtGui.QIcon(":/media/media/visomaster_small.png"))
 
+        # 修改-启动弹窗添加倒计时
+        self.setModal(True)
+
+        self.countdown_seconds = 5
+        self.timer = None
+
         # Create button box
         QBtn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
         self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
-        self.buttonBox.setCenterButtons(True)  # <-- ADD THIS LINE
+        self.buttonBox.setCenterButtons(True)
         self.buttonBox.accepted.connect(self.load_workspace)
         self.buttonBox.rejected.connect(self.reject)
+
+        self.countdown_label = QtWidgets.QLabel(f"Auto loading in {self.countdown_seconds} seconds...")
+        self.countdown_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
         # Create layout and add widgets
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(QtWidgets.QLabel("Do you want to load your last workspace?"))
+        layout.addWidget(self.countdown_label)
         layout.addWidget(self.buttonBox)
 
         # Set dialog layout
         self.setLayout(layout)
 
+        self.start_countdown()
+
+    def start_countdown(self):
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(self.update_countdown)
+        self.timer.start(1000)
+
+    def update_countdown(self):
+        self.countdown_seconds -= 1
+        if self.countdown_seconds > 0:
+            from app.ui.translations import translate
+            self.countdown_label.setText(translate(f"Auto loading in {self.countdown_seconds} seconds..."))
+        else:
+            self.timer.stop()
+            self.load_workspace()
+
     def load_workspace(self):
+        if self.timer:
+            self.timer.stop()
         self.accept()
         save_load_actions.load_saved_workspace(self.main_window, "last_workspace.json")
 
@@ -3162,3 +3191,91 @@ class CollapsibleSection(QtWidgets.QWidget):
 
     def toggle_expanded(self):
         self.set_expanded(not self._expanded)
+
+
+#修改-添加人脸查找对话框-start
+class FindFaceDialog(QtWidgets.QDialog):
+    def __init__(self, main_window: "MainWindow", parent_path: str):
+        super().__init__(main_window)
+        self.main_window = main_window
+        self.parent_path = parent_path
+        self.selected_folder = ""
+        self.all_folders = []
+
+        self.setWindowTitle("查找人脸")
+        self.setWindowIcon(QtGui.QIcon(":/media/media/visomaster_small.png"))
+        self.setMinimumSize(400, 500)
+        self.setModal(True)
+
+        self.search_label = QtWidgets.QLabel("搜索:")
+        self.search_edit = QtWidgets.QLineEdit(self)
+        self.search_edit.setPlaceholderText("输入拼音、汉字或字符搜索...")
+        self.search_edit.textChanged.connect(self.filter_folders)
+
+        self.folder_list = QtWidgets.QListWidget(self)
+        self.folder_list.itemDoubleClicked.connect(self.select_folder)
+
+        QBtn = QtWidgets.QDialogButtonBox.Cancel
+        self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
+        self.buttonBox.rejected.connect(self.reject)
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(self.search_label)
+        layout.addWidget(self.search_edit)
+        layout.addWidget(QtWidgets.QLabel("人脸文件夹:"))
+        layout.addWidget(self.folder_list)
+        layout.addWidget(self.buttonBox)
+
+        self.setLayout(layout)
+
+        self.load_folders()
+
+    def get_pinyin(self, text, initials=False):
+        try:
+            pinyin_list = lazy_pinyin(text)
+            if initials:
+                initials_list = [p[0] if p else '' for p in pinyin_list]
+                pinyin_text = ''.join(initials_list).lower()
+            else:
+                pinyin_text = ''.join(pinyin_list).lower()
+            return pinyin_text
+        except Exception:
+            return text.lower()
+
+    def load_folders(self):
+        self.folder_list.clear()
+        self.all_folders = []
+
+        if not os.path.exists(self.parent_path):
+            return
+
+        try:
+            for item in os.listdir(self.parent_path):
+                item_path = os.path.join(self.parent_path, item)
+                if os.path.isdir(item_path):
+                    self.all_folders.append(item)
+                    list_item = QtWidgets.QListWidgetItem(item)
+                    self.folder_list.addItem(list_item)
+        except Exception as e:
+            pass
+
+    def filter_folders(self):
+        search_text = self.search_edit.text().lower()
+
+        self.folder_list.clear()
+
+        for folder in self.all_folders:
+            folder_lower = folder.lower()
+            folder_pinyin = self.get_pinyin(folder, initials=False)
+            folder_pinyin_initials = self.get_pinyin(folder, initials=True)
+
+            if (search_text in folder_lower or
+                search_text in folder_pinyin or
+                search_text in folder_pinyin_initials):
+                list_item = QtWidgets.QListWidgetItem(folder)
+                self.folder_list.addItem(list_item)
+
+    def select_folder(self, item):
+        self.selected_folder = os.path.join(self.parent_path, item.text())
+        self.accept()
+#修改-添加人脸查找对话框-end

@@ -21,3 +21,8 @@ IF %EXIT_CODE% NEQ 0 (
     echo         Review the output above for details, then press any key to close.
     pause >nul
 )
+
+REM Deactivate conda environment on exit (only needed when using conda)
+IF NOT EXIST ".venv" (
+    call conda deactivate
+)

@@ -237,6 +237,25 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             partial(list_view_actions.select_input_face_images, self, "folder")
         )
 
+        # 修改-添加人脸查找按钮
+        self.buttonFindFace = QtWidgets.QPushButton()
+        self.buttonFindFace.setObjectName("buttonFindFace")
+        self.buttonFindFace.setFlat(True)
+        self.buttonFindFace.setIcon(QtGui.QIcon("app/ui/core/media/search.png"))
+        self.buttonFindFace.setIconSize(QtCore.QSize(18, 18))
+        self.buttonFindFace.setToolTip("查找人脸")
+        self.buttonFindFace.clicked.connect(
+            partial(list_view_actions.show_find_face_dialog, self)
+        )
+        self.horizontalLayout_Faces.addWidget(self.buttonFindFace)
+
+        # 修改-添加全选人脸按钮 (点击事件由 translations.py 的 setup_select_all_button 绑定)
+        self.selectAllFacesButton = QtWidgets.QPushButton("全选")
+        self.selectAllFacesButton.setObjectName("selectAllFacesButton")
+        self.selectAllFacesButton.setFlat(True)
+        self.selectAllFacesButton.setMaximumSize(80, 16777215)
+        self.horizontalLayout_3.insertWidget(0, self.selectAllFacesButton)
+
         # Initialize graphics frame to view frames
         self.scene = QtWidgets.QGraphicsScene()
         self.graphicsViewFrame.setScene(self.scene)
