@@ -226,7 +226,11 @@ class FaceSwappers:
         )
 
         for name in output_names:
-            io_binding.bind_output(name, self.models_processor.device_type, self.models_processor.binding_device_id)
+            io_binding.bind_output(
+                name,
+                self.models_processor.device_type,
+                self.models_processor.binding_device_id,
+            )
 
         self._run_model_with_lazy_build_check(arcface_model, ort_session, io_binding)
 
@@ -296,7 +300,11 @@ class FaceSwappers:
             shape=img.size(),
             buffer_ptr=img.data_ptr(),
         )
-        io_binding.bind_output(name="output", device_type=self.models_processor.device_type, device_id=self.models_processor.binding_device_id)
+        io_binding.bind_output(
+            name="output",
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
+        )
 
         self._run_model_with_lazy_build_check(model_name, model, io_binding)
 
@@ -341,7 +349,11 @@ class FaceSwappers:
             shape=img.size(),
             buffer_ptr=img.data_ptr(),
         )
-        io_binding.bind_output(name="output", device_type=self.models_processor.device_type, device_id=self.models_processor.binding_device_id)
+        io_binding.bind_output(
+            name="output",
+            device_type=self.models_processor.device_type,
+            device_id=self.models_processor.binding_device_id,
+        )
 
         self._run_model_with_lazy_build_check(model_name, model, io_binding)
 

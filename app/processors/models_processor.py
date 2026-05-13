@@ -735,16 +735,16 @@ class ModelsProcessor(QtCore.QObject):
                     return self.models.get(model_name)
 
                 if session_options is None:
-                    model_instance = onnxruntime.InferenceSession(
-                        self.models_path[model_name],
-                        providers=model_providers,
-                    )
-                else:
-                    model_instance = onnxruntime.InferenceSession(
-                        self.models_path[model_name],
-                        sess_options=session_options,
-                        providers=model_providers,
-                    )
+                    session_options = onnxruntime.SessionOptions()
+
+                # Force log_severity_level to 3 (ERROR) for the actual load as well, to suppress non-critical warnings from ONNX Runtime that can clutter the console.
+                session_options.log_severity_level = 3
+
+                model_instance = onnxruntime.InferenceSession(
+                    self.models_path[model_name],
+                    sess_options=session_options,
+                    providers=model_providers,
+                )
 
                 # This ensures the CUDA context is synchronized after a new TRT
                 # engine build, before we try to load it.
@@ -1205,7 +1205,10 @@ class ModelsProcessor(QtCore.QObject):
                 self.device = "cpu"
                 self.device_type = "cpu"
             case "CUDA":
-                providers = [("CUDAExecutionProvider", {"device_id": self.gpu_id}), ("CPUExecutionProvider")]
+                providers = [
+                    ("CUDAExecutionProvider", {"device_id": self.gpu_id}),
+                    ("CPUExecutionProvider"),
+                ]
                 self.device = f"cuda:{self.gpu_id}"
                 self.device_type = "cuda"
             case _:
@@ -2119,18 +2122,20 @@ class ModelsProcessor(QtCore.QObject):
         del image_srgb_float_minus1_1_batched
         final_denoised_latent_x0_scaled = None
 
-        # OPTIMISATION PCIe : non_blocking=True
-        is_ref_flag_tensor_for_unet = (
-            torch.tensor([use_reference_exclusive_path], dtype=torch.bool)
-            .to(self.device, non_blocking=True)
-            .contiguous()
-        )
+        # OPTIMIZATION VRAM/PCIe: Create boolean tensors DIRECTLY on the GPU.
+        # Passing a Python list to torch.tensor() allocates CPU RAM first and forces a PCIe transfer.
+        # torch.ones/torch.zeros directly on the device avoids CPU-GPU sync overhead.
+        if use_reference_exclusive_path:
+            is_ref_flag_tensor_for_unet = torch.ones(
+                1, dtype=torch.bool, device=self.device
+            )
+        else:
+            is_ref_flag_tensor_for_unet = torch.zeros(
+                1, dtype=torch.bool, device=self.device
+            )
 
-        actual_use_exclusive_path_tensor_for_unet = (
-            torch.tensor([use_reference_exclusive_path], dtype=torch.bool)
-            .to(self.device, non_blocking=True)
-            .contiguous()
-        )
+        actual_use_exclusive_path_tensor_for_unet = is_ref_flag_tensor_for_unet
+        false_tensor_for_unet = torch.zeros(1, dtype=torch.bool, device=self.device)
 
         rng = torch.Generator(device=self.device)
         rng.manual_seed(base_seed)
@@ -2150,16 +2155,16 @@ class ModelsProcessor(QtCore.QObject):
             )
             alpha_t_bar_val = self.alphas_cumprod_np[current_t_idx]
 
-            # OPTIMISATION PCIe
+            # OPTIMIZATION VRAM: Direct GPU creation
             sqrt_alpha_bar_t_torch = torch.sqrt(
-                torch.tensor(alpha_t_bar_val, dtype=torch.float32).to(
-                    self.device, non_blocking=True
+                torch.full(
+                    (1,), alpha_t_bar_val, dtype=torch.float32, device=self.device
                 )
             )
             sqrt_one_minus_alpha_bar_t_torch = torch.sqrt(
                 1.0
-                - torch.tensor(alpha_t_bar_val, dtype=torch.float32).to(
-                    self.device, non_blocking=True
+                - torch.full(
+                    (1,), alpha_t_bar_val, dtype=torch.float32, device=self.device
                 )
             )
 
@@ -2171,9 +2176,9 @@ class ModelsProcessor(QtCore.QObject):
                 (xt_noisy_scaled_8_channel, lq_latent_x0_scaled_for_unet), dim=1
             )
 
-            # OPTIMISATION PCIe
-            timesteps_tensor_unet = torch.tensor([current_t_idx], dtype=torch.int64).to(
-                self.device, non_blocking=True
+            # OPTIMIZATION VRAM: Direct GPU creation
+            timesteps_tensor_unet = torch.full(
+                (1,), current_t_idx, dtype=torch.int64, device=self.device
             )
 
             predicted_noise_from_unet = torch.empty(
@@ -2181,7 +2186,6 @@ class ModelsProcessor(QtCore.QObject):
             ).contiguous()
 
             # CUDA Stream Sync: Ensure all non-blocking PCIe transfers are complete
-            # before ONNX/TensorRT execution begins to prevent race conditions.
             if torch.cuda.is_available():
                 torch.cuda.current_stream().synchronize()
 
@@ -2200,7 +2204,6 @@ class ModelsProcessor(QtCore.QObject):
 
         # --- PROCESS: Full Restore (DDIM) ---
         elif denoiser_mode == "Full Restore (DDIM)":
-            # Removed the redundant and wrong cuda stream sync here as the worker are now in a separate global stream
             num_ddpm_timesteps = self.alphas_cumprod_np.shape[0]
 
             _ddim_raw_ddpm_timesteps_np = ModelsProcessor.make_ddim_timesteps(
@@ -2218,7 +2221,7 @@ class ModelsProcessor(QtCore.QObject):
                 )
             )
 
-            # OPTIMISATION PCIe : Numpy -> Tensor async
+            # Numpy -> Tensor directly on device
             ddim_sigmas = (
                 torch.from_numpy(_ddim_sigmas_np)
                 .float()
@@ -2234,6 +2237,7 @@ class ModelsProcessor(QtCore.QObject):
                 .float()
                 .to(self.device, non_blocking=True)
             )
+
             ddim_sqrt_one_minus_alphas = torch.sqrt(
                 torch.clamp(1.0 - ddim_alphas, min=0.0)
             )
@@ -2249,32 +2253,36 @@ class ModelsProcessor(QtCore.QObject):
 
             pred_x0_scaled_current_step = torch.empty_like(lq_latent_x0_scaled_for_unet)
 
-            # Pre-allocate tensor
-            false_tensor_for_unet = (
-                torch.tensor([False], dtype=torch.bool)
-                .to(self.device, non_blocking=True)
-                .contiguous()
+            # --- OPTIMIZATION VRAM: Pre-allocate DDIM Loop Buffers ---
+            # Allocating these inside the loop causes massive VRAM fragmentation
+            # and stalls the CUDA allocator. We allocate once per function call.
+            ts_unet = torch.empty((1,), dtype=torch.int64, device=self.device)
+            schedule_idx_tensor = torch.empty(
+                (1,), dtype=torch.long, device=self.device
             )
+            e_t_cond = torch.empty_like(lq_latent_x0_scaled_for_unet)
+            e_t_uncond = (
+                torch.empty_like(lq_latent_x0_scaled_for_unet)
+                if denoiser_cfg_scale != 1.0
+                else None
+            )
+            noise_ddim_buffer = torch.empty_like(lq_latent_x0_scaled_for_unet)
 
             for i, step_ddpm_idx in enumerate(time_range_ddpm_indices):
                 index_for_schedules = total_steps - 1 - i
 
-                # OPTIMISATION PCIe
-                ts_unet = torch.full((1,), step_ddpm_idx, dtype=torch.int64).to(
-                    self.device, non_blocking=True
-                )
+                # OPTIMIZATION VRAM: In-place update of pre-allocated tensors
+                ts_unet.fill_(step_ddpm_idx)
+                schedule_idx_tensor.fill_(index_for_schedules)
 
                 unet_input_cond = torch.cat(
-                    [current_latent_xt_scaled, lq_latent_x0_scaled_for_unet],
-                    dim=1,
+                    [current_latent_xt_scaled, lq_latent_x0_scaled_for_unet], dim=1
                 )
-                e_t_cond = torch.empty_like(lq_latent_x0_scaled_for_unet)
 
-                # CUDA Stream Sync: Wait for the async timestep tensor transfer
-                # before running the UNet in the conditional pass.
                 if torch.cuda.is_available():
                     torch.cuda.current_stream().synchronize()
 
+                # The ONNX runtime writes directly into our pre-allocated e_t_cond buffer
                 self.face_restorers.run_ref_ldm_unet(
                     x_noisy_plus_lq_latent=unet_input_cond,
                     timesteps_tensor=ts_unet,
@@ -2287,15 +2295,9 @@ class ModelsProcessor(QtCore.QObject):
 
                 if denoiser_cfg_scale != 1.0:
                     unet_input_uncond = torch.cat(
-                        [
-                            current_latent_xt_scaled,
-                            lq_latent_x0_scaled_for_unet,
-                        ],
-                        dim=1,
+                        [current_latent_xt_scaled, lq_latent_x0_scaled_for_unet], dim=1
                     )
-                    e_t_uncond = torch.empty_like(lq_latent_x0_scaled_for_unet)
 
-                    # Optional secondary sync if there are any other async operations between calls.
                     if torch.cuda.is_available():
                         torch.cuda.current_stream().synchronize()
 
@@ -2309,15 +2311,8 @@ class ModelsProcessor(QtCore.QObject):
                     )
                     e_t = e_t_uncond + denoiser_cfg_scale * (e_t_cond - e_t_uncond)
 
-                # OPTIMISATION PCIe
-                schedule_idx_tensor = torch.tensor(
-                    [index_for_schedules], dtype=torch.long
-                ).to(self.device, non_blocking=True)
-
                 a_t = ModelsProcessor.extract_into_tensor_torch(
-                    ddim_alphas,
-                    schedule_idx_tensor,
-                    current_latent_xt_scaled.shape,
+                    ddim_alphas, schedule_idx_tensor, current_latent_xt_scaled.shape
                 )
                 a_prev = ModelsProcessor.extract_into_tensor_torch(
                     ddim_alphas_prev,
@@ -2325,9 +2320,7 @@ class ModelsProcessor(QtCore.QObject):
                     current_latent_xt_scaled.shape,
                 )
                 sigma_t = ModelsProcessor.extract_into_tensor_torch(
-                    ddim_sigmas,
-                    schedule_idx_tensor,
-                    current_latent_xt_scaled.shape,
+                    ddim_sigmas, schedule_idx_tensor, current_latent_xt_scaled.shape
                 )
                 sqrt_one_minus_a_t = ModelsProcessor.extract_into_tensor_torch(
                     ddim_sqrt_one_minus_alphas,
@@ -2342,12 +2335,11 @@ class ModelsProcessor(QtCore.QObject):
                 dir_xt = (
                     torch.sqrt(torch.clamp(1.0 - a_prev - sigma_t**2, min=1e-8)) * e_t
                 )
-                noise_ddim = sigma_t * torch.randn(
-                    current_latent_xt_scaled.shape,
-                    device=self.device,
-                    dtype=current_latent_xt_scaled.dtype,
-                    generator=rng,
-                )
+
+                # OPTIMIZATION VRAM: Reuse noise buffer instead of generating a new tensor every step
+                noise_ddim_buffer.normal_(generator=rng)
+                noise_ddim = sigma_t * noise_ddim_buffer
+
                 current_latent_xt_scaled = (
                     torch.sqrt(a_prev) * pred_x0_scaled_current_step
                     + dir_xt
