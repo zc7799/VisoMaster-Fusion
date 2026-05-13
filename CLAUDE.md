@@ -1,0 +1,172 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 项目概述
+
+VisoMaster Fusion 是一个 AI 换脸/编辑桌面应用，基于 Python 3.11、PySide6 (Qt)、PyTorch + CUDA、ONNX Runtime + TensorRT、OpenCV 构建。
+
+## 常用命令
+
+### 运行应用
+
+```sh
+# 独立模式 (已有 Python 环境)
+python main.py
+
+# Windows 便携版启动器
+Start_Portable.bat
+
+# Conda/uv 环境 (非便携版)
+Start.bat
+```
+
+### 测试
+
+```sh
+# 运行所有 CPU 测试 (默认跳过 GPU)
+pytest
+
+# 包含 GPU 测试
+pytest -m "gpu"
+
+# 跳过 GPU 测试
+pytest -m "not gpu"
+
+# 跳过慢速测试
+pytest -m "not slow"
+
+# 生成测试 fixture 图片（首次运行前）
+python tests/fixtures/generate_fixtures.py
+
+# 运行单个测试文件
+pytest tests/unit/processors/test_face_detectors_logic.py
+```
+
+### 代码质量
+
+```sh
+# 运行所有 pre-commit 钩子
+pre-commit run --all-files
+
+# 单独运行 ruff
+ruff check .
+ruff format --check .
+
+# mypy 类型检查
+mypy app/
+```
+
+### 模型管理
+
+```sh
+# 下载所需 AI 模型
+python download_models.py
+
+# 编译自定义 CUDA 内核 (需 MSVC + CUDA Toolkit)
+python custom_kernels/build_kernels.py
+
+# 优化 ONNX 模型（减小文件体积）
+python app/tools/optimize_models.py
+```
+
+### 安装依赖
+
+```sh
+# CUDA 12.9 环境 (推荐)
+uv pip install -r requirements_cu129.txt
+
+# RTX 50 系列
+uv pip install -r requirements_rtx50.txt
+```
+
+## 核心架构
+
+### 入口点
+
+- `main.py` — 直接启动主应用，加载 QSS 主题后创建 `MainWindow`
+- `app/ui/launcher/main.py` — 便携版启动器入口，负责环境检查和管理依赖
+- `app/ui/core/main_window.py` — **自动生成**的 Qt UI 代码（从 `MainWindow.ui` 通过 `pyside6-uic` 生成），不要手动编辑
+
+### 主窗口 `MainWindow` (`app/ui/main_ui.py`)
+
+应用的中央协调器。拥有并连接两大核心处理器：`VideoProcessor` 和 `ModelsProcessor`。管理所有 UI 状态、控件字典、工作线程。
+
+### 视频处理器 `VideoProcessor` (`app/processors/video_processor.py`)
+
+管理视频/图片/摄像头管线的 `QObject`：
+- 从媒体读取帧（视频、图片、摄像头）
+- 将帧分发到 `FrameWorker` 线程池处理
+- 管理播放节拍器（QTimer）、录制（通过 FFmpeg）、虚拟摄像头输出
+- 处理多段录制
+
+### 模型处理器 `ModelsProcessor` (`app/processors/models_processor.py`)
+
+所有 AI 模型的加载、卸载和推理调度。管理 ONNX Runtime 和 TensorRT 引擎。通过信号与 UI 通信模型加载状态。关键的引擎构建 ONNX → TensorRT 转换通过隔离子进程完成，防止 C++/CUDA 崩溃波及主进程。
+
+### 帧工作线程 `FrameWorker` (`app/processors/workers/frame_worker.py`)
+
+处理单帧的线程。完整管线：检测 → 换脸 → 增强 → 后处理。支持线程池持续模式和单帧预览模式。
+
+### 模型类（`app/processors/face_*.py`）
+
+每个文件包含相关模型的类族，由 `ModelsProcessor` 实例化和管理：
+
+| 文件 | 用途 |
+|------|------|
+| `face_detectors.py` | 人脸检测（RetinaFace, SCRFD, YOLO 等） |
+| `face_landmark_detectors.py` | 面部关键点检测 |
+| `face_swappers.py` | 换脸模型（InSwapper, GhostFace, DFM 等） |
+| `face_restorers.py` | 面部修复/超分（GFPGAN, CodeFormer, GPEN 等） |
+| `face_masks.py` | 面部遮罩生成与处理 |
+| `face_editors.py` | LivePortrait 面部姿态/表情编辑 |
+| `face_reaging.py` | 面部老化/年轻化 |
+| `frame_enhancers.py` | 帧级别增强 |
+| `frame_edits.py` | 帧编辑操作 |
+| `mouth_openness.py` | 张嘴程度检测 |
+| `mouth_action_detector.py` | 嘴部动作检测 |
+
+### UI 架构 (`app/ui/widgets/`)
+
+- `widget_components.py` — 可复用的 Qt 控件类（滑块、选择框、卡片按钮等）
+- `actions/` — 每个文件对应一组 UI 操作：
+  - `control_actions.py` — 控制选项面板的参数变更回调
+  - `video_control_actions.py` — 播放/录制控制
+  - `card_actions.py` — 目标视频和源人脸卡片的交互
+  - `list_view_actions.py` — 列表视图操作
+  - `layout_actions.py` — 面板布局和控件创建
+  - `save_load_actions.py` — 工作区保存/加载
+  - `job_manager_actions.py` — 任务管理器
+  - `preset_actions.py` — 预设管理
+  - `common_actions.py` — 公共控件和跨面板共享逻辑
+  - `filter_actions.py` — 搜索/过滤
+  - `graphics_view_actions.py` — 预览窗口交互
+- `*_layout_data.py` — 声明式 UI 布局定义（控件名称、范围、默认值）
+
+### 工具类和辅助模块 (`app/helpers/`)
+
+- `miscellaneous.py` — DFM 模型管理器、参数字典、缩略图管理器、几何变换
+- `vr_utils.py` — VR180 等距柱状投影/透视转换
+- `downloader.py` — 模型文件下载
+- `typing_helper.py` — 共享类型定义
+
+### 自定义 CUDA 内核 (`custom_kernels/`)
+
+为 InSwapper 和 GFPGAN/GPEN 编写的融合 CUDA C++ 算子，编译为 `.pyd` 文件置于 `model_assets/custom_kernels/`。支持 sm_70 到 sm_120 架构。需 CUDA Toolkit 12.8+ 编译 sm_120 (RTX 50xx)。
+
+### 模型目录说明
+
+- `model_assets/` — 下载/编译的 ONNX 模型和 TensorRT 引擎
+- `tensorrt-engines/` — 运行构建的 TensorRT 引擎缓存
+- `custom_kernels/` — CUDA 内核源码，每个子目录对应一个内核
+
+## 代码约定
+
+- Python 3.11+，类型提示 (mypy)。不使用 `from __future__ import annotations`
+- 使用 `ruff` 进行格式化和 lint，pre-commit 自动运行
+- Qt UI 是通过 Qt Designer 设计的，使用 `.ui` 文件 → `pyside6-uic` 编译为 `main_window.py`。**千万不要手动编辑 `app/ui/core/main_window.py`**
+- `media_rc.py` 是从 `media.qrc` 自动生成的资源文件（图标、图片），**同样不要手动编辑**
+- 所有与 `app/processors/external/` 下的 vendored 第三方代码不进行 lint/format/type-check
+- TensorRT 引擎构建发生在 `ModelsProcessor` 启动的隔离子进程中——ONNX Runtime 和 TensorRT 绝不能在同一进程中同时导入
+- GPU 测试有 `@pytest.mark.gpu` 标记，默认跳过。conftest.py 提供 mock fixtures
+- 条件导入 TensorRT：`TENSORRT_AVAILABLE` 全局标志，所有 TensorRT 相关代码路径需检查此标志
