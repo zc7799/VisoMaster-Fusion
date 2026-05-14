@@ -2824,7 +2824,6 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
                     # This will use the markers, inputs, etc., currently set in the UI
                     # and will block until the video is fully processed and saved.
 
-                    # --- BATCH VIDEO FIX (Preventing Face Mix-ups) ---
                     # 1. Purge the tracker and the Temporal EMA state for the new video
                     if hasattr(main_window, "video_processor") and hasattr(
                         main_window.video_processor, "sequential_detector"
@@ -2834,13 +2833,10 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
                             "[INFO] Batch: Detector state and Temporal EMA cleared for the new video."
                         )
 
-                    # 2. Temporarily force the Embedding-based recognition method
-                    main_window.force_recognition_in_batch = True
-
-                    # 3. Trigger the recording. This will start the async process.
+                    # 2. Trigger the recording. This will start the async process.
                     record_video(main_window, True)
 
-                    # 4. Wait for the processing to finish.
+                    # 3. Wait for the processing to finish.
                     # This loop now checks for cancellation
                     while (
                         main_window.video_processor.processing
@@ -2861,7 +2857,7 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
 
                         QtCore.QThread.msleep(1)  # 1ms sleep
 
-                    # 5. At this point, record_video has completed (or been aborted)
+                    # 4. At this point, record_video has completed (or been aborted)
                     # We must check *again* if the loop was exited due to cancellation
                     # to avoid incorrectly incrementing the 'processed_count'.
                     if not progress_dialog.confirmedCanceled():
@@ -2888,10 +2884,6 @@ def process_batch_images(main_window: "MainWindow", process_all_faces: bool):
         main_window.is_batch_processing = False
         # 8. Close the progress dialog
         progress_dialog.close_without_confirmation()
-
-        # Clear the forced recognition flag to avoid impacting manual processing mode
-        if hasattr(main_window, "force_recognition_in_batch"):
-            main_window.force_recognition_in_batch = False
 
         # 9. Show completion message
         if progress_dialog.confirmedCanceled():

@@ -1603,12 +1603,6 @@ def load_job_settings(main_window: "MainWindow", job_data: dict):
         # 4. Load markers.
         _load_job_markers(main_window, job_data)
 
-        # --- Arm the recognition flag for the new job ---
-        # We MUST set this to True here in the Main Thread before processing starts.
-        # This forces the sequential_detector's feeder_thread to run ArcFace on the
-        # first frame, preventing identity bleed (Fast-Path bypass) from the previous job.
-        main_window.force_recognition_in_batch = True
-
         # Calculate assigned_input_embedding here for KV injection
         for face_id, target_face_button in main_window.target_faces.items():
             print(

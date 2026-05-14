@@ -563,6 +563,7 @@ class FrameWorker(threading.Thread):
         detected_embedding_np,
         control_global,
         target_faces_snapshot: dict | None = None,
+        is_sequentially_tracked: bool = False,
     ):
         """Finds the best matching source face for a detected target face.
 
@@ -584,11 +585,21 @@ class FrameWorker(threading.Thread):
         with self.lock:
             default_params_dict = dict(self.main_window.default_parameters.data)
 
+        # FW-ARCH-FIX: Trust the Sequential Detector
+        # If the face was already rescued temporally, we bypass the UI threshold
+        current_params = copy.deepcopy(self.parameters)
+        if is_sequentially_tracked:
+            for face_id, p in current_params.items():
+                if isinstance(p, dict):
+                    p["SimilarityThresholdSlider"] = 0.0
+            if "SimilarityThresholdSlider" in default_params_dict:
+                default_params_dict["SimilarityThresholdSlider"] = 0.0
+
         return find_best_target_match(
             detected_embedding_np,
             self.models_processor,
             faces_to_iterate,
-            self.parameters,
+            current_params,
             cast(dict, default_params_dict),
             str(control_global["RecognitionModelSelection"]),
         )
@@ -2009,7 +2020,12 @@ class FrameWorker(threading.Thread):
         # The workers are now "Stateless Render Engines". They no longer track time or state.
         # They consume perfectly sequenced and EMA-smoothed detections from the Feeder thread.
 
-        if self.precomputed_bboxes is not None and self.precomputed_kpss_5 is not None:
+        # FW-ARCH-FIX: Flag to know if faces were vetted by the Sequential Detector
+        is_sequentially_tracked = (
+            self.precomputed_bboxes is not None and self.precomputed_kpss_5 is not None
+        )
+
+        if is_sequentially_tracked:
             # 1. Primary Path (Video/Webcam): Use the sequentially precomputed detections
             bboxes = self.precomputed_bboxes
             kpss_5 = self.precomputed_kpss_5
@@ -2176,12 +2192,18 @@ class FrameWorker(threading.Thread):
             or isinstance(kpss_5, list)
             and len(kpss_5) > 0
         ):
+            safe_bboxes = cast(Any, bboxes)
+
+            _kpss_list = cast(list, kpss) if kpss is not None else []
+            _kpss_203_list = cast(list, kpss_203) if kpss_203 is not None else []
+
             for i in range(len(kpss_5)):
-                _bbox_i = bboxes[i]
+                _bbox_i = safe_bboxes[i]
                 if not is_detected_face_eligible_for_matching(
                     kpss_5[i], _bbox_i, self._MIN_FACE_PIXELS
                 ):
                     continue  # too small to produce meaningful swap
+
                 similarity_type = str("Auto")
                 face_emb, _ = self.models_processor.run_recognize_direct(
                     img,
@@ -2190,11 +2212,9 @@ class FrameWorker(threading.Thread):
                     control["RecognitionModelSelection"],
                 )
 
-                kps_all_i = kpss[i] if kpss is not None and i < len(kpss) else None
+                kps_all_i = _kpss_list[i] if i < len(_kpss_list) else None
                 # Extract the 203 points specifically
-                kps_203_i = (
-                    kpss_203[i] if kpss_203 is not None and i < len(kpss_203) else None
-                )
+                kps_203_i = _kpss_203_list[i] if i < len(_kpss_203_list) else None
 
                 det_faces_data_for_display.append(
                     {
@@ -2202,7 +2222,9 @@ class FrameWorker(threading.Thread):
                         "kps_all": kps_all_i.copy() if kps_all_i is not None else None,
                         "kps_203": kps_203_i.copy() if kps_203_i is not None else None,
                         "embedding": face_emb,
-                        "bbox": bboxes[i].copy() if bboxes[i] is not None else None,
+                        "bbox": safe_bboxes[i].copy()
+                        if safe_bboxes[i] is not None
+                        else None,
                         "original_face": None,
                         "swap_mask": None,
                         "matched_target": None,  # FW-BUG-09: cache slot
@@ -2232,14 +2254,20 @@ class FrameWorker(threading.Thread):
                     for fface in det_faces_data_for_display:
                         # FW-BUG-09: pass snapshot; cache result on fface for downstream reuse
                         tgt, tgt_params, score = self._find_best_target_match(
-                            fface["embedding"], control, target_faces_snapshot
+                            fface["embedding"],
+                            control,
+                            target_faces_snapshot,
+                            is_sequentially_tracked=is_sequentially_tracked,
                         )
                         fface["matched_target"] = tgt
                         if tgt and tgt.face_id == target_face.face_id:
-                            if (
-                                score >= tgt_params["SimilarityThresholdSlider"]
-                                and score > best_score
-                            ):
+                            # FW-ARCH-FIX: Bypass strict UI threshold locally if rescued temporally
+                            effective_threshold = (
+                                tgt_params["SimilarityThresholdSlider"]
+                                if not is_sequentially_tracked
+                                else 0.0
+                            )
+                            if score >= effective_threshold and score > best_score:
                                 best_score = score
                                 best_fface = fface
 
@@ -2369,7 +2397,10 @@ class FrameWorker(threading.Thread):
                         break
                     # FW-BUG-09: pass the target_faces snapshot to avoid re-iterating live dict
                     best_target, params, _ = self._find_best_target_match(
-                        fface["embedding"], control, target_faces_snapshot
+                        fface["embedding"],
+                        control,
+                        target_faces_snapshot,
+                        is_sequentially_tracked=is_sequentially_tracked,
                     )
                     # FW-BUG-09: cache matched target so downstream helpers can reuse it
                     fface["matched_target"] = best_target
