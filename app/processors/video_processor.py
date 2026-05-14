@@ -4235,10 +4235,24 @@ class VideoProcessor(QObject):
         finally:
             shutil.rmtree(temp_audio_dir, ignore_errors=True)
 
+    def _auto_save_workspace_for_output(self, final_file_path: str) -> None:
+        if not self.main_window.control.get("AutoSaveWorkspaceToggle"):
+            return
+        if not final_file_path:
+            return
+
+        try:
+            save_load_actions.save_current_workspace(
+                self.main_window, f"{final_file_path}.json"
+            )
+        except Exception as e:
+            print(f"[WARN] Failed to auto-save workspace after recording: {e}")
+
     def _finalize_default_style_recording(self):
         """Finalizes a successful default-style recording (adds audio, cleans up)."""
         print("[INFO] Finalizing default-style recording...")
         temp_audio_dir: str | None = None
+        final_file_path = ""
 
         # Check if processing stopped due to error limit
         if self.stopped_by_error_limit:
@@ -4540,21 +4554,7 @@ class VideoProcessor(QObject):
                 num_frames_processed = 0
             self._log_processing_summary(processing_time_sec, num_frames_processed)
 
-            # AutoSave workspace if enabled
-            if self.main_window.control.get("AutoSaveWorkspaceToggle"):
-                output_folder = (
-                    str(getattr(self, "active_output_folder", "") or "").strip()
-                    or str(
-                        self.main_window.control.get("OutputMediaFolder", "")
-                    ).strip()
-                )
-                json_file_path = misc_helpers.get_output_file_path(
-                    self.media_path, output_folder
-                )
-                json_file_path += ".json"
-                save_load_actions.save_current_workspace(
-                    self.main_window, json_file_path
-                )
+            self._auto_save_workspace_for_output(final_file_path)
 
             # 8b. Reopen media capture AFTER FFmpeg audio merge.
             if self.file_type == "video" and self.media_path:
@@ -5221,6 +5221,9 @@ class VideoProcessor(QObject):
         finally:
             # 6. Cleanup
             self._cleanup_temp_dir()
+
+            if concatenation_successful:
+                self._auto_save_workspace_for_output(final_file_path)
 
             # 7. Reset state
             self.segments_to_process = []
