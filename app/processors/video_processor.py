@@ -2083,11 +2083,25 @@ class VideoProcessor(QObject):
         elif self.file_type == "webcam":
             # For webcam, re-opening essentially prepares it for the next 'Play' click.
             try:
-                webcam_index = int(
-                    self.main_window.control.get("WebcamDeviceSelection", 0)
-                )
-                self.media_capture = cv2.VideoCapture(webcam_index)
-                if not self.media_capture.isOpened():
+                webcam_index = int(self.main_window.control.get("WebcamDeviceSelection", 0))
+                
+                backend_name = self.main_window.control.get("WebcamBackendSelection", "Default")
+                backend_id = CAMERA_BACKENDS.get(backend_name, cv2.CAP_ANY)
+                
+                self.media_capture = cv2.VideoCapture(webcam_index, backend_id)
+                
+                if self.media_capture.isOpened():
+                    try:
+                        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+                        self.media_capture.set(cv2.CAP_PROP_FOURCC, fourcc)
+                    except Exception:
+                        pass
+                    
+                    res_str = self.main_window.control.get("WebcamMaxResSelection", "1280x720")
+                    target_width, target_height = map(int, res_str.split("x"))
+                    self.media_capture.set(cv2.CAP_PROP_FRAME_WIDTH, target_width)
+                    self.media_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, target_height)
+                else:
                     print("[WARN] Failed to re-open webcam capture after stop.")
                     self.media_capture = None
             except Exception as e:
@@ -5448,6 +5462,10 @@ class VideoProcessor(QObject):
         )
 
         # 2. Initialize VideoCapture with the selected Backend
+        if self.media_capture:
+            misc_helpers.release_capture(self.media_capture)
+            self.media_capture = None
+
         try:
             self.media_capture = cv2.VideoCapture(webcam_index, backend_id)
         except Exception as e:
