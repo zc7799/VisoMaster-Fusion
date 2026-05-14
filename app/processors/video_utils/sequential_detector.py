@@ -169,6 +169,12 @@ class SequentialDetector:
         rec_model = str(control.get("RecognitionModelSelection", "ArcFace"))
         default_params = dict(self.main_window.default_parameters.data)
 
+        # --- BATCH VIDEO FIX: Enforce Identity Anchor ---
+        # Read the global flag injected during a batch process
+        force_recognition = getattr(
+            self.main_window, "force_recognition_in_batch", False
+        )
+
         # 2a. Fast-path: skip ArcFace identity verification when the scene contains exactly
         # one detected face and the user has configured exactly one target face. This saves
         # one ArcFace inference per frame at ~5-10 ms each — significant headroom on webcam
@@ -176,6 +182,11 @@ class SequentialDetector:
         # so a wrong-identity slip-through is corrected downstream.
         # Toggle name FastPathSingleFaceToggle (default True). Power users can disable.
         fast_path_enabled = bool(control.get("FastPathSingleFaceToggle", True))
+
+        # --- BATCH VIDEO FIX: Disable Fast-path to guarantee actual identity check ---
+        if force_recognition:
+            fast_path_enabled = False
+
         used_fast_path = False
         if (
             fast_path_enabled
@@ -218,7 +229,8 @@ class SequentialDetector:
             and bboxes.shape[0] > 0
         ):
             # If no specific targets are configured (e.g., pure FaceTracking mode), keep everyone
-            valid_indices = list(range(len(bboxes)))
+            if not force_recognition:
+                valid_indices = list(range(len(bboxes)))
 
         # 2c. Relaxed-threshold ArcFace pass — runs only when the strict pass produced no
         # matches. ArcFace embeddings degrade on side angles, motion blur, and partial
@@ -279,12 +291,19 @@ class SequentialDetector:
         # where ArcFace produces a near-zero similarity (severe motion blur, occlusion).
         # The FrameWorker still performs identity verification before swapping.
         if (
-            len(valid_indices) == 0
+            not force_recognition  # --- BATCH VIDEO FIX: Block fallback during anchoring ---
+            and len(valid_indices) == 0
             and isinstance(bboxes, numpy.ndarray)
             and bboxes.shape[0] == 1
             and len(target_faces) > 0
         ):
             valid_indices = [0]
+
+        # --- BATCH VIDEO FIX: Release Identity Anchor ---
+        # If we successfully verified the target via true ArcFace recognition,
+        # disable the batch flag to restore Fast-path and Temporal Smoothing optimizations.
+        if force_recognition and len(valid_indices) > 0:
+            self.main_window.force_recognition_in_batch = False
 
         # Apply the filter to eliminate background extras
         filtered_bboxes = (

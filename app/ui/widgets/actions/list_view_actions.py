@@ -105,6 +105,88 @@ def _has_pending_target_media_thumbnail_work(main_window: "MainWindow") -> bool:
     return bool(pending_items) or bool(timer and timer.isActive())
 
 
+# INPUT FACES BATCHING SYSTEM
+def _ensure_input_face_batch_timer(main_window: "MainWindow") -> QtCore.QTimer:
+    """
+    Ensures a QTimer exists for batching input face thumbnails.
+    This timer regulates the flow of UI updates to prevent freezing.
+    """
+    timer = getattr(main_window, "_input_face_batch_timer", None)
+    if timer is None:
+        timer = QtCore.QTimer(main_window)
+        timer.setSingleShot(True)
+        timer.timeout.connect(partial(_flush_input_face_thumbnail_batch, main_window))
+        main_window._input_face_batch_timer = timer
+    return timer
+
+
+def _flush_input_face_thumbnail_batch(main_window: "MainWindow") -> None:
+    """
+    Processes a batch of pending input face thumbnails.
+    Disables UI updates during processing to eliminate flickering and reduce main thread load.
+    """
+    pending_items = getattr(main_window, "_pending_input_face_thumbnails", None)
+    if not pending_items:
+        return
+
+    list_widget = main_window.inputFacesList
+    pending_before = len(pending_items)
+
+    # Block rendering to prevent UI flickering (Critical for performance)
+    list_widget.setUpdatesEnabled(False)
+    try:
+        # Conservative batch size (24) to avoid saturating the main thread
+        # with heavy PyTorch Tensors and K/V dictionary injections.
+        batch_size = min(24, pending_before)
+        for _ in range(batch_size):
+            media_path, cropped_face, embedding_store, q_image, face_id = (
+                pending_items.popleft()
+            )
+            add_media_thumbnail_button(
+                main_window,
+                widget_components.InputFaceCardButton,
+                list_widget,
+                main_window.input_faces,
+                q_image,
+                media_path=media_path,
+                cropped_face=cropped_face,
+                embedding_store=embedding_store,
+                face_id=face_id,
+            )
+    finally:
+        # Re-enable and force a single paint event
+        list_widget.setUpdatesEnabled(True)
+        list_widget.viewport().update()
+
+    # If items remain in the queue, restart the timer for the next batch
+    if pending_items:
+        _ensure_input_face_batch_timer(main_window).start(
+            _TARGET_MEDIA_BATCH_INTERVAL_MS
+        )
+
+
+def _queue_input_face_thumbnail(
+    main_window: "MainWindow",
+    media_path,
+    cropped_face,
+    embedding_store,
+    q_image,
+    face_id,
+) -> None:
+    """
+    Appends a loaded input face to the queue and starts the batching timer if not already running.
+    """
+    pending_items = getattr(main_window, "_pending_input_face_thumbnails", None)
+    if pending_items is None:
+        pending_items = deque()
+        main_window._pending_input_face_thumbnails = pending_items
+
+    pending_items.append((media_path, cropped_face, embedding_store, q_image, face_id))
+    timer = _ensure_input_face_batch_timer(main_window)
+    if not timer.isActive():
+        timer.start(_TARGET_MEDIA_BATCH_INTERVAL_MS)
+
+
 # Functions to add Buttons with thumbnail for selecting videos/images and faces
 @QtCore.Slot(str, QtGui.QImage, str, str)
 def add_media_thumbnail_to_target_videos_list(
@@ -164,16 +246,10 @@ def add_media_thumbnail_to_source_faces_list(
     q_image,
     face_id,
 ):
-    add_media_thumbnail_button(
-        main_window,
-        widget_components.InputFaceCardButton,
-        main_window.inputFacesList,
-        main_window.input_faces,
-        q_image,
-        media_path=media_path,
-        cropped_face=cropped_face,
-        embedding_store=embedding_store,
-        face_id=face_id,
+    # Route the incoming data to the queue instead of instantiating the UI widget immediately.
+    # This delegates the heavy lifting to the batching system, preventing UI freezing and flickering.
+    _queue_input_face_thumbnail(
+        main_window, media_path, cropped_face, embedding_store, q_image, face_id
     )
 
 
@@ -317,10 +393,8 @@ def initialize_media_list_widgets(main_window: "MainWindow"):
         listWidget.setMovement(QtWidgets.QListView.Static)
         listWidget.setResizeMode(QtWidgets.QListView.Adjust)
         listWidget.setUniformItemSizes(True)
-        if listWidget is main_window.targetVideosList:
-            # Target media already uses an explicit queue + timer batcher.
-            # Keeping Qt's own batched layout here can defer geometry updates
-            # and make items appear all at once near the end.
+        # MODIFIED: Both target and input media now use explicit Python queue batchers.
+        if listWidget in (main_window.targetVideosList, main_window.inputFacesList):
             listWidget.setLayoutMode(QtWidgets.QListView.SinglePass)
         else:
             listWidget.setLayoutMode(QtWidgets.QListView.Batched)
@@ -511,6 +585,11 @@ def load_target_webcams(main_window: "MainWindow", *args, **kwargs):
 
 
 def clear_stop_loading_input_media(main_window: "MainWindow", clear_list: bool = True):
+    # ADDED: Safely stop the batching timer and clear the queue.
+    batch_timer = getattr(main_window, "_input_face_batch_timer", None)
+    if batch_timer is not None:
+        batch_timer.stop()
+    main_window._pending_input_face_thumbnails = deque()
     if main_window.input_faces_loader_worker is not None:
         worker = main_window.input_faces_loader_worker
         worker.blockSignals(True)

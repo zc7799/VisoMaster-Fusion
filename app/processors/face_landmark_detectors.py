@@ -441,7 +441,11 @@ class FaceLandmarkDetectors:
 
         # Bind outputs. The device will allocate memory for them.
         for name in output_names:
-            io_binding.bind_output(name, self.models_processor.device_type, self.models_processor.binding_device_id)
+            io_binding.bind_output(
+                name,
+                self.models_processor.device_type,
+                self.models_processor.binding_device_id,
+            )
 
         # --- LAZY BUILD CHECK ---
         is_lazy_build = self.models_processor.check_and_clear_pending_build(model_name)

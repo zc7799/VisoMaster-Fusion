@@ -2317,8 +2317,8 @@ def calc_combined_eye_ratio(c_d_eyes_i, source_lmk, device="cuda"):
         [c_d_eyes_i[0][0]], dtype=np.float32
     )  # Assicurati che sia un array NumPy
     c_d_eyes_i_numpy = np.array(
-        [max(c_d_eyes_i_numpy_m, 0.10)], dtype=np.float32
-    )  # Mini 0.1 otherwise eyelids overlap
+        [max(c_d_eyes_i_numpy_m, 0.08)], dtype=np.float32
+    )  # Mini 0.08 otherwise eyelids overlap
     c_d_eyes_i_tensor = torch.from_numpy(c_d_eyes_i_numpy).reshape(1, 1).to(device)
     # [c_s,eyes, c_d,eyes,i]
     combined_eye_ratio_tensor = torch.cat([c_s_eyes_tensor, c_d_eyes_i_tensor], dim=1)
@@ -2337,8 +2337,8 @@ def calc_combined_eye_ratio_norm(c_d_eyes_i, source_lmk, device="cuda"):
         [c_d_eyes_i[0][1]], dtype=np.float32
     )  # Assicurati che sia un array NumPy
     c_d_eyes_i_numpy = np.array(
-        [max(min(c_d_eyes_i_numpy_l, c_d_eyes_i_numpy_r), 0.10)], dtype=np.float32
-    )  # Mini 0.1 otherwise eyelids overlap
+        [max(min(c_d_eyes_i_numpy_l, c_d_eyes_i_numpy_r), 0.08)], dtype=np.float32
+    )  # Mini 0.08 otherwise eyelids overlap
     c_d_eyes_i_tensor = torch.from_numpy(c_d_eyes_i_numpy).reshape(1, 1).to(device)
     # [c_s,eyes, c_d,eyes,i]
     combined_eye_ratio_tensor = torch.cat([c_s_eyes_tensor, c_d_eyes_i_tensor], dim=1)

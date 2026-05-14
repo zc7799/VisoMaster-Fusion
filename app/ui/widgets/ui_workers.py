@@ -357,79 +357,97 @@ class InputFacesLoaderWorker(qtc.QThread):
         for image_file_path, face_id in paired_files_ids:
             if not self._running:  # Check if the thread is still running
                 break
-            if not misc_helpers.is_image_file(image_file_path):
-                continue
 
-            frame = misc_helpers.read_image_file(image_file_path)
-            if frame is None:
-                continue
-
-            # Frame must be in RGB format
-            frame = frame[..., ::-1]  # Swap the channels from BGR to RGB
-
-            img = torch.from_numpy(frame.astype("uint8")).to(
-                self.main_window.models_processor.device
-            )
-            img = img.permute(2, 0, 1)
-
-            _, kpss_5, _ = self.main_window.models_processor.run_detect(
-                img,
-                control.get("DetectorModelSelection", "RetinaFace"),
-                max_num=1,
-                score=control.get("DetectorScoreSlider", 50) / 100.0,
-                input_size=(512, 512),
-                use_landmark_detection=control.get("LandmarkDetectToggle", False),
-                landmark_detect_mode=control.get("LandmarkDetectModelSelection", "203"),
-                landmark_score=control.get("LandmarkDetectScoreSlider", 50) / 100.0,
-                from_points=control.get("DetectFromPointsToggle", False),
-                rotation_angles=[0]
-                if not control.get("AutoRotationToggle", False)
-                else [0, 90, 180, 270],
-            )
-
-            if kpss_5 is None or len(kpss_5) == 0:
-                continue
-
-            face_kps = kpss_5[0]
-            if face_kps.any():
-                # Calculate embedding ONLY for the selected recognition model
-                selected_recognition_model = control.get(
-                    "RecognitionModelSelection", "Inswapper128ArcFace"
-                )
-                similarity_type = str("Auto")
-                face_emb, cropped_img = (
-                    self.main_window.models_processor.run_recognize_direct(
-                        img,
-                        face_kps,
-                        similarity_type,
-                        selected_recognition_model,  # Use selected model
-                    )
-                )
-
-                if face_emb is None:  # Check if recognition failed
+            # WORKER SAFETY: Wrap the entire image processing in a try/except block.
+            # If an image is corrupted or causes a tensor shape mismatch, it will gracefully
+            # skip to the next image without crashing the entire loader thread.
+            try:
+                if not misc_helpers.is_image_file(image_file_path):
                     continue
 
-                cropped_img_np = cropped_img.cpu().numpy()
-                # Swap channels from RGB to BGR for pixmap creation
-                face_img = numpy.ascontiguousarray(cropped_img_np[..., ::-1])
+                frame = misc_helpers.read_image_file(image_file_path)
+                if frame is None:
+                    print(
+                        f"[WARNING] InputFacesLoaderWorker: Could not read image, skipping {image_file_path}"
+                    )
+                    continue
 
-                # QIMAGE THREAD-SAFE
-                height, width, channel = face_img.shape
-                bytes_per_line = 3 * width
-                q_image = QImage(
-                    face_img.data, width, height, bytes_per_line, QImage.Format_BGR888
-                ).copy()
+                # Frame must be in RGB format
+                frame = frame[..., ::-1]  # Swap the channels from BGR to RGB
 
-                embedding_store: Dict[str, numpy.ndarray] = {
-                    selected_recognition_model: face_emb,
-                    "kps_5": face_kps,
-                }
+                img = torch.from_numpy(frame.astype("uint8")).to(
+                    self.main_window.models_processor.device
+                )
+                img = img.permute(2, 0, 1)
 
-                self.thumbnail_ready.emit(
-                    image_file_path, face_img, embedding_store, q_image, face_id
+                _, kpss_5, _ = self.main_window.models_processor.run_detect(
+                    img,
+                    control.get("DetectorModelSelection", "RetinaFace"),
+                    max_num=1,
+                    score=control.get("DetectorScoreSlider", 50) / 100.0,
+                    input_size=(512, 512),
+                    use_landmark_detection=control.get("LandmarkDetectToggle", False),
+                    landmark_detect_mode=control.get(
+                        "LandmarkDetectModelSelection", "203"
+                    ),
+                    landmark_score=control.get("LandmarkDetectScoreSlider", 50) / 100.0,
+                    from_points=control.get("DetectFromPointsToggle", False),
+                    rotation_angles=[0]
+                    if not control.get("AutoRotationToggle", False)
+                    else [0, 90, 180, 270],
                 )
 
-        # torch.cuda.empty_cache()  removed to not block main thread
+                if kpss_5 is None or len(kpss_5) == 0:
+                    continue
+
+                face_kps = kpss_5[0]
+                if face_kps.any():
+                    # Calculate embedding ONLY for the selected recognition model
+                    selected_recognition_model = control.get(
+                        "RecognitionModelSelection", "Inswapper128ArcFace"
+                    )
+                    similarity_type = str("Auto")
+                    face_emb, cropped_img = (
+                        self.main_window.models_processor.run_recognize_direct(
+                            img,
+                            face_kps,
+                            similarity_type,
+                            selected_recognition_model,  # Use selected model
+                        )
+                    )
+
+                    if face_emb is None:  # Check if recognition failed
+                        continue
+
+                    cropped_img_np = cropped_img.cpu().numpy()
+                    # Swap channels from RGB to BGR for pixmap creation
+                    face_img = numpy.ascontiguousarray(cropped_img_np[..., ::-1])
+
+                    # QIMAGE THREAD-SAFE
+                    height, width, channel = face_img.shape
+                    bytes_per_line = 3 * width
+                    q_image = QImage(
+                        face_img.data,
+                        width,
+                        height,
+                        bytes_per_line,
+                        QImage.Format_BGR888,
+                    ).copy()
+
+                    embedding_store: Dict[str, numpy.ndarray] = {
+                        selected_recognition_model: face_emb,
+                        "kps_5": face_kps,
+                    }
+
+                    self.thumbnail_ready.emit(
+                        image_file_path, face_img, embedding_store, q_image, face_id
+                    )
+
+            except Exception as e:
+                print(
+                    f"[ERROR] InputFacesLoaderWorker: Failed to process {image_file_path}. Reason: {e}"
+                )
+                continue  # Skip this specific corrupt image and continue the loop
 
     def stop(self):
         # Stop the thread by setting the running flag to False.

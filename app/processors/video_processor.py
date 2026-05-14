@@ -161,9 +161,9 @@ class VideoProcessor(QObject):
         self.preroll_target = min(
             max(20, int(self.num_threads * 1.5)), 40
         )  # Target number of frames before playback starts
-        self.max_display_buffer_size = (
-            self.preroll_target * 4
-        )  # Max frames allowed "in flight" (queued + being displayed)
+        # OPTIMIZATION RAM: Reduced the aggressive *4 multiplier to prevent massive RAM
+        # bloat on 4K/8K videos. We only need enough buffer to keep workers busy.
+        self.max_display_buffer_size = self.preroll_target + (self.num_threads * 2)
         self.max_frames_to_display_size = 8  # VP-22: Hard cap on frames_to_display dict
 
         # This queue will hold tasks: (frame_number, frame_rgb_data, params, control) or None (poison pill)
@@ -351,7 +351,8 @@ class VideoProcessor(QObject):
         # Clear all pending (old) frames from the queue
         while not self.webcam_frames_to_display.empty():
             try:
-                self.webcam_frames_to_display.get_nowait()
+                stale_frame = self.webcam_frames_to_display.get_nowait()
+                del stale_frame
             except queue.Empty:
                 break
 
@@ -743,9 +744,23 @@ class VideoProcessor(QObject):
                 if len(self.frames_to_display) >= self.max_frames_to_display_size:
                     time.sleep(0.005)  # Wait 5ms (display dict full)
                     continue
+
                 in_flight_frames = (
                     len(self.frames_to_display) + self.frame_queue.qsize()
                 )
+
+                # OPTIMIZATION RAM: Absolute Available Memory Safety Net.
+                # we throttle the buffer to the bare minimum needed to keep workers busy, preventing an OS crash.
+                MIN_FREE_RAM_BYTES = 2.5 * 1024 * 1024 * 1024  # 2.5 Go
+                min_safe_buffer = min(self.num_threads * 2, 8)
+
+                if (
+                    in_flight_frames > min_safe_buffer
+                    and psutil.virtual_memory().available < MIN_FREE_RAM_BYTES
+                ):
+                    time.sleep(0.05)  # Throttle to let workers and GC catch up
+                    continue
+
                 if in_flight_frames >= self.max_display_buffer_size:
                     time.sleep(0.005)  # Wait 5ms (buffer full)
                     continue
@@ -1330,7 +1345,7 @@ class VideoProcessor(QObject):
         self.main_window.models_processor.set_number_of_threads(value)
         self.num_threads = value
         self.preroll_target = min(max(20, int(self.num_threads * 1.5)), 40)
-        self.max_display_buffer_size = self.preroll_target * 4
+        self.max_display_buffer_size = self.preroll_target + (self.num_threads * 2)
 
     def process_video(self):
         """
@@ -3133,18 +3148,16 @@ class VideoProcessor(QObject):
             )
 
         local_params = self._filter_scan_face_params(
-            cast(FacesParametersTypes, copy.deepcopy(marker_data.get("parameters", {})))
+            cast(FacesParametersTypes, marker_data.get("parameters", {}))
         )
         local_control: ControlTypes = cast(ControlTypes, {})
         local_control.update(
             self._filter_scan_control(
                 cast(
                     ControlTypes,
-                    copy.deepcopy(
-                        control_defaults_snapshot
-                        if control_defaults_snapshot is not None
-                        else {}
-                    ),
+                    control_defaults_snapshot
+                    if control_defaults_snapshot is not None
+                    else {},
                 )
             )
         )

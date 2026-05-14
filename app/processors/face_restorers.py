@@ -776,9 +776,21 @@ class FaceRestorers:
             shape=fidelity_ratio.size(),
             buffer_ptr=fidelity_ratio.data_ptr(),
         )
-        io_binding.bind_output("enc_feat", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("quant_logit", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("texture_dec", self.models_processor.device_type, self.models_processor.binding_device_id)
+        io_binding.bind_output(
+            "enc_feat",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "quant_logit",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "texture_dec",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
         io_binding.bind_output(
             name="main_dec",
             device_type=self.models_processor.device_type,
@@ -814,20 +826,76 @@ class FaceRestorers:
             shape=output.size(),
             buffer_ptr=output.data_ptr(),
         )
-        io_binding.bind_output("1228", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("1238", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("onnx::MatMul_1198", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("onnx::Shape_1184", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("onnx::ArgMin_1182", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("input.1", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("x", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("x.3", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("x.7", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("x.11", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("x.15", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("input.252", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("input.280", self.models_processor.device_type, self.models_processor.binding_device_id)
-        io_binding.bind_output("input.288", self.models_processor.device_type, self.models_processor.binding_device_id)
+        io_binding.bind_output(
+            "1228",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "1238",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "onnx::MatMul_1198",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "onnx::Shape_1184",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "onnx::ArgMin_1182",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "input.1",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "x",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "x.3",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "x.7",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "x.11",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "x.15",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "input.252",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "input.280",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
+        io_binding.bind_output(
+            "input.288",
+            self.models_processor.device_type,
+            self.models_processor.binding_device_id,
+        )
 
         # Run the model with lazy build handling
         self._run_model_with_lazy_build_check(model_name, ort_session, io_binding)

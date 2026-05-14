@@ -560,7 +560,9 @@ class FaceDetectors:
         args.update(kwargs)
 
         if detect_mode in ["RetinaFace", "SCRFD"]:
-            args["input_size"] = input_size #Reverted back because some faces are not detected with the auto-resolved size.
+            args["input_size"] = (
+                input_size  # Reverted back because some faces are not detected with the auto-resolved size.
+            )
 
         # Run the detector — returns (det, kpss_5, kpss, det_scores)
         det, kpss_5, kpss, det_scores = detection_function(**args)
@@ -824,7 +826,11 @@ class FaceDetectors:
                 "477",
                 "500",
             ]:
-                io_binding.bind_output(i, self.models_processor.device_type, self.models_processor.binding_device_id)
+                io_binding.bind_output(
+                    i,
+                    self.models_processor.device_type,
+                    self.models_processor.binding_device_id,
+                )
             # Run the model with lazy build handling
             net_outs = self._run_model_with_lazy_build_check(
                 model_name, ort_session, io_binding
@@ -1004,7 +1010,11 @@ class FaceDetectors:
                 buffer_ptr=aimg.data_ptr(),
             )
             for name in output_names:
-                io_binding.bind_output(name, self.models_processor.device_type, self.models_processor.binding_device_id)
+                io_binding.bind_output(
+                    name,
+                    self.models_processor.device_type,
+                    self.models_processor.binding_device_id,
+                )
 
             # Run the model with lazy build handling
             net_outs = self._run_model_with_lazy_build_check(
@@ -1186,7 +1196,11 @@ class FaceDetectors:
                 shape=aimg_prepared.size(),  # Use shape of prepared tensor
                 buffer_ptr=aimg_prepared.data_ptr(),  # Use data_ptr of prepared tensor
             )
-            io_binding.bind_output("output0", self.models_processor.device_type, self.models_processor.binding_device_id)
+            io_binding.bind_output(
+                "output0",
+                self.models_processor.device_type,
+                self.models_processor.binding_device_id,
+            )
             # Run the model with lazy build handling
             net_outs = self._run_model_with_lazy_build_check(
                 model_name, ort_session, io_binding
@@ -1355,7 +1369,11 @@ class FaceDetectors:
                 buffer_ptr=aimg_prepared.data_ptr(),  # Use data_ptr of prepared tensor
             )
             for name in output_names:
-                io_binding.bind_output(name, self.models_processor.device_type, self.models_processor.binding_device_id)
+                io_binding.bind_output(
+                    name,
+                    self.models_processor.device_type,
+                    self.models_processor.binding_device_id,
+                )
 
             # Run the model with lazy build handling
             net_outs = self._run_model_with_lazy_build_check(
