@@ -1969,6 +1969,9 @@ class VideoProcessor(QObject):
         self.recording = False
         self.triggered_by_job_manager = False
         self.active_output_folder = ""
+        # Disarm the batch recognition flag to prevent UI side-effects after an abort
+        if hasattr(self.main_window, "force_recognition_in_batch"):
+            self.main_window.force_recognition_in_batch = False
         self._cancel_single_frame_preview_state()
 
         # 2. Stop utility timers and audio
