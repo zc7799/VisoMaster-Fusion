@@ -361,13 +361,13 @@ class TargetMediaCardButton(CardButton):
             ].split("x")
 
             media_capture = cv2.VideoCapture(self.webcam_index, self.webcam_backend)
-            
+
             try:
                 fourcc = cv2.VideoWriter_fourcc(*"MJPG")
                 media_capture.set(cv2.CAP_PROP_FOURCC, fourcc)
             except Exception:
                 pass
-            
+
             media_capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(res_width))
             media_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(res_height))
             max_frames_number = 999999

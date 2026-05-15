@@ -16,7 +16,6 @@ import psutil
 import numpy
 import torch
 import pyvirtualcam
-import math
 import copy
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
@@ -30,6 +29,7 @@ from app.ui.widgets.actions import layout_actions
 from app.ui.widgets.actions import list_view_actions
 from app.ui.widgets.actions import save_load_actions
 from app.ui.widgets.settings_layout_data import CAMERA_BACKENDS
+from app.processors.video_utils.video_encoding import FFmpegEncoder, FFmpegPostProcessor
 import app.helpers.miscellaneous as misc_helpers
 from app.helpers.typing_helper import (
     ControlTypes,
@@ -217,9 +217,7 @@ class VideoProcessor(QObject):
 
         # --- Subprocesses ---
         self.virtcam: pyvirtualcam.Camera | None = None
-        self.recording_sp: subprocess.Popen | None = (
-            None  # FFmpeg process for both recording styles
-        )
+        self.encoder = FFmpegEncoder()
         self.ffplay_sound_sp: subprocess.Popen | None = (
             None  # ffplay process for live audio
         )
@@ -1238,24 +1236,19 @@ class VideoProcessor(QObject):
 
         # Write to FFmpeg
         if self.is_processing_segments or self.recording:
-            if (
-                self.recording_sp
-                and self.recording_sp.stdin
-                and not self.recording_sp.stdin.closed
-            ):
-                try:
-                    self.recording_sp.stdin.write(frame.tobytes())
+            if self.encoder.is_running():
+                if self.encoder.write_frame(frame):
                     # update counters for duration calculation
                     self.frames_written += 1
                     self.last_displayed_frame = frame_number_to_display
-                except OSError as e:
+                else:
                     log_prefix = (
                         f"segment {self.current_segment_index + 1}"
                         if self.is_processing_segments
                         else "recording"
                     )
                     print(
-                        f"[WARN] Error writing frame {frame_number_to_display} to FFmpeg stdin during {log_prefix}: {e}"
+                        f"[WARN] Error writing frame {frame_number_to_display} to FFmpeg encoder during {log_prefix}."
                     )
             else:
                 log_prefix = (
@@ -1264,7 +1257,7 @@ class VideoProcessor(QObject):
                     else "recording"
                 )
                 print(
-                    f"[WARN] FFmpeg stdin not available for {log_prefix} when trying to write frame {frame_number_to_display}."
+                    f"[WARN] FFmpeg encoder not available for {log_prefix} when trying to write frame {frame_number_to_display}."
                 )
 
         # Update UI
@@ -1537,7 +1530,26 @@ class VideoProcessor(QObject):
 
         # DELAYED FFMPEG CREATION
         if self.recording:
-            if not self.create_ffmpeg_subprocess(output_filename=None):
+            self.temp_file = self._prepare_default_temp_file()
+            if os.path.exists(self.temp_file):
+                try:
+                    os.remove(self.temp_file)
+                except OSError:
+                    pass
+
+            frame_height, frame_width, _ = self.current_frame.shape
+
+            success = self.encoder.start_process(
+                output_filename=self.temp_file,
+                frame_width=frame_width,
+                frame_height=frame_height,
+                fps=self.fps,
+                control=self.main_window.control,
+                is_segment=False,
+                media_path=self.media_path,
+            )
+
+            if not success:
                 print("[ERROR] Failed to start FFmpeg for default-style recording.")
                 self.stop_processing()  # Abort the start
                 return
@@ -2017,24 +2029,10 @@ class VideoProcessor(QObject):
         self.join_and_clear_threads()
         print("[INFO] Worker threads joined.")
 
-        # 5. Stop and cleanup FFmpeg subprocess
-        if self.recording_sp:
-            print("[INFO] Closing and waiting for active FFmpeg subprocess...")
-            if self.recording_sp.stdin and not self.recording_sp.stdin.closed:
-                try:
-                    self.recording_sp.stdin.close()
-                except OSError as e:
-                    print(f"[WARN] Error closing ffmpeg stdin during abort: {e}")
-            try:
-                self.recording_sp.wait(timeout=5)
-                print("[INFO] FFmpeg subprocess terminated.")
-            except subprocess.TimeoutExpired:
-                print("[WARN] FFmpeg subprocess did not terminate gracefully, killing.")
-                self.recording_sp.kill()
-                self.recording_sp.wait()
-            except Exception as e:
-                print(f"[ERROR] Error waiting for FFmpeg subprocess: {e}")
-            self.recording_sp = None
+        # 5. Stop and cleanup FFmpeg encoder
+        if self.encoder.is_running():
+            print("[INFO] Closing and waiting for active FFmpeg encoder...")
+            self.encoder.close_process()
 
         # 6. Cleanup temp files based on stopped mode.
         if was_processing_segments:
@@ -2083,21 +2081,29 @@ class VideoProcessor(QObject):
         elif self.file_type == "webcam":
             # For webcam, re-opening essentially prepares it for the next 'Play' click.
             try:
-                webcam_index = int(self.main_window.control.get("WebcamDeviceSelection", 0))
-                
-                backend_name = self.main_window.control.get("WebcamBackendSelection", "Default")
+                webcam_index = int(
+                    self.main_window.control.get("WebcamDeviceSelection", 0)
+                )
+
+                backend_name = str(
+                    self.main_window.control.get("WebcamBackendSelection", "Default")
+                )
                 backend_id = CAMERA_BACKENDS.get(backend_name, cv2.CAP_ANY)
-                
+
                 self.media_capture = cv2.VideoCapture(webcam_index, backend_id)
-                
+
                 if self.media_capture.isOpened():
                     try:
                         fourcc = cv2.VideoWriter_fourcc(*"MJPG")
                         self.media_capture.set(cv2.CAP_PROP_FOURCC, fourcc)
                     except Exception:
                         pass
-                    
-                    res_str = self.main_window.control.get("WebcamMaxResSelection", "1280x720")
+
+                    res_str = str(
+                        self.main_window.control.get(
+                            "WebcamMaxResSelection", "1280x720"
+                        )
+                    )
                     target_width, target_height = map(int, res_str.split("x"))
                     self.media_capture.set(cv2.CAP_PROP_FRAME_WIDTH, target_width)
                     self.media_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, target_height)
@@ -2433,551 +2439,48 @@ class VideoProcessor(QObject):
         except Exception as e:
             print(f"[WARN] Could not calculate average FPS: {e}\n")
 
-    # --- FFmpeg and Finalization ---
-
-    @staticmethod
-    def _parse_ffprobe_fps(rate_text: Any) -> float | None:
-        """Parse ffprobe frame-rate strings such as "30000/1001" safely."""
-        if rate_text is None:
-            return None
+    def _prepare_default_temp_file(self) -> str:
+        """
+        Prepares the temporary directory and generates a temp file path for default recording.
+        Cleans up orphaned temp files from previous crashed sessions.
+        """
+        date_and_time = datetime.now().strftime(r"%Y_%m_%d_%H_%M_%S")
         try:
-            text = str(rate_text).strip()
-            if not text:
-                return None
-            if "/" in text:
-                num_s, den_s = text.split("/", 1)
-                num = float(num_s)
-                den = float(den_s)
-                if den == 0:
-                    return None
-                value = num / den
-            else:
-                value = float(text)
-            return value if value > 0 else None
-        except Exception:
-            return None
+            base_temp_dir = os.path.join(os.getcwd(), "temp_files", "default")
+            os.makedirs(base_temp_dir, exist_ok=True)
 
-    def _probe_source_video_metrics(self, file_path: str) -> Dict[str, Any] | None:
-        """Probe source video metrics needed for quality matching.
-
-        Returns a dictionary with keys: bit_rate, width, height, fps.
-        """
-        if not file_path or not os.path.isfile(file_path):
-            return None
-
-        try:
-            import json
-
-            args = [
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "stream=codec_type,codec_name,width,height,bit_rate,avg_frame_rate,r_frame_rate:format=bit_rate",
-                file_path,
-            ]
-            result = subprocess.run(args, capture_output=True, text=True, timeout=30)
-            if result.returncode != 0:
-                return None
-
-            probe_data = json.loads(result.stdout)
-            video_stream = next(
-                (
-                    s
-                    for s in probe_data.get("streams", [])
-                    if s.get("codec_type") == "video"
-                ),
-                None,
-            )
-            if not isinstance(video_stream, dict):
-                return None
-
-            width = int(video_stream.get("width") or 0)
-            height = int(video_stream.get("height") or 0)
-
-            bit_rate_raw = video_stream.get("bit_rate")
-            if not bit_rate_raw:
-                bit_rate_raw = probe_data.get("format", {}).get("bit_rate")
-            bit_rate = float(bit_rate_raw) if bit_rate_raw else 0.0
-
-            fps = self._parse_ffprobe_fps(video_stream.get("avg_frame_rate"))
-            if not fps:
-                fps = self._parse_ffprobe_fps(video_stream.get("r_frame_rate"))
-
-            if width <= 0 or height <= 0 or not fps or bit_rate <= 0:
-                return None
-
-            return {
-                "bit_rate": bit_rate,
-                "width": float(width),
-                "height": float(height),
-                "fps": float(fps),
-                "codec_name": str(video_stream.get("codec_name") or "").lower(),
-            }
-        except Exception:
-            return None
-
-    @staticmethod
-    def _source_codec_to_hevc_factor(codec_name: str) -> float:
-        """Map source codec efficiency relative to HEVC for quality matching."""
-        codec = (codec_name or "").lower()
-        if codec in {"hevc", "h265"}:
-            return 1.00
-        if codec in {"h264", "avc"}:
-            return 0.78
-        if codec == "av1":
-            return 1.28
-        if codec == "vp9":
-            return 1.18
-        if codec in {"mpeg2video", "mpeg4", "msmpeg4v3"}:
-            return 0.68
-        # Unknown codecs: use a conservative middle-ground.
-        return 0.90
-
-    def _get_adaptive_recording_quality(
-        self,
-        control: Mapping[str, Any],
-        quality_value: int,
-        output_width: int,
-        output_height: int,
-        source_metrics: Mapping[str, Any] | None = None,
-        output_fps: float | None = None,
-    ) -> int:
-        """Auto-compute CQ/CRF from source metrics to keep perceived quality close.
-
-        When auto-match is enabled, this method computes an absolute target quality
-        from source bitrate density instead of applying a small delta to the manual
-        slider value. This keeps behavior robust even if manual FFQualitySlider is
-        set to an unreasonable value.
-        """
-        if not (
-            bool(control.get("FFMpegOptionsToggle", False))
-            and bool(control.get("FFAutoMatchSourceQualityToggle", False))
-        ):
-            return quality_value
-
-        if source_metrics is None:
-            source_metrics = self._probe_source_video_metrics(self.media_path or "")
-        if not source_metrics:
-            print(
-                "[INFO] Source-quality auto match enabled, but probe failed. Using manual Quality unchanged."
-            )
-            return quality_value
-
-        src_w = max(1.0, source_metrics["width"])
-        src_h = max(1.0, source_metrics["height"])
-        src_fps = max(0.001, source_metrics["fps"])
-        src_bitrate = max(1.0, source_metrics["bit_rate"])
-        src_codec = str(source_metrics.get("codec_name", "") or "").lower()
-        out_fps = float(output_fps) if output_fps and output_fps > 0 else src_fps
-
-        # Bits-per-pixel-per-frame (bpppf) is a lightweight content/quality proxy.
-        src_bpppf = src_bitrate / (src_w * src_h * src_fps)
-
-        src_pixels = src_w * src_h
-        out_pixels = float(max(1, output_width) * max(1, output_height))
-        scale_ratio = out_pixels / src_pixels
-
-        # Convert source density to a HEVC-equivalent density baseline.
-        codec_factor = self._source_codec_to_hevc_factor(src_codec)
-        target_bpppf = src_bpppf * codec_factor
-
-        # Temporal adjustment for output fps changes. Keep it intentionally gentle
-        # so fps differences do not dominate quality estimation.
-        temporal_ratio = max(0.5, min(2.0, out_fps / src_fps))
-        target_bpppf *= temporal_ratio**0.35
-
-        # Resolution-aware density adjustment:
-        # - Upscale: allow more density to preserve restored detail.
-        # - Downscale: allow less density to avoid wasting bits.
-        if scale_ratio > 1.0:
-            up_steps = math.log2(scale_ratio)
-            target_bpppf *= min(1.35, 1.0 + 0.15 * up_steps)
-        elif scale_ratio < 1.0:
-            down_steps = math.log2(1.0 / max(scale_ratio, 1e-6))
-            target_bpppf *= max(0.70, 1.0 - 0.20 * down_steps)
-
-        # Map target bpppf to an absolute CQ/CRF target (lower is higher quality).
-        # Tuned to stay in a practical range for SDR NVENC CQ and HDR x265 CRF.
-        if target_bpppf >= 0.25:
-            auto_quality = 14
-        elif target_bpppf >= 0.16:
-            auto_quality = 16
-        elif target_bpppf >= 0.11:
-            auto_quality = 18
-        elif target_bpppf >= 0.08:
-            auto_quality = 20
-        elif target_bpppf >= 0.055:
-            auto_quality = 22
-        elif target_bpppf >= 0.038:
-            auto_quality = 24
-        elif target_bpppf >= 0.028:
-            auto_quality = 26
-        elif target_bpppf >= 0.020:
-            auto_quality = 28
-        elif target_bpppf >= 0.014:
-            auto_quality = 30
-        else:
-            auto_quality = 33
-
-        adapted_quality = max(12, min(36, int(auto_quality)))
-
-        print(
-            "[INFO] Source-quality auto match: "
-            f"source={src_w:.0f}x{src_h:.0f}@{src_fps:.3f} "
-            f"codec={src_codec or 'unknown'} bitrate={src_bitrate / 1_000_000:.3f}Mbps "
-            f"src_bpppf={src_bpppf:.5f} target_bpppf={target_bpppf:.5f} "
-            f"out_fps={out_fps:.3f} temporal_ratio={temporal_ratio:.3f}, "
-            f"manual_quality={quality_value} auto_quality={adapted_quality}"
-        )
-        return adapted_quality
-
-    def create_ffmpeg_subprocess(self, output_filename: str):
-        """
-        Creates the FFmpeg subprocess for recording.
-        This is a merged function used by both default-style and multi-segment recording.
-
-        :param output_filename: The direct output path. If None, it's default-style
-                                recording and a temp file will be generated.
-        """
-        control = self.main_window.control.copy()
-        is_segment = output_filename is not None
-
-        # 1. Guards
-        if (
-            not isinstance(self.current_frame, numpy.ndarray)
-            or self.current_frame.size == 0
-        ):
-            print("[ERROR] Current frame invalid. Cannot get dimensions.")
-            return False
-        if not self.media_path or not Path(self.media_path).is_file():
-            print("[ERROR] Original media path invalid.")
-            return False
-        if self.fps <= 0:
-            print("[ERROR] Invalid FPS.")
-            return False
-
-        start_time_sec = 0.0
-        end_time_sec = 0.0
-
-        if is_segment:
-            if self.current_segment_index < 0 or self.current_segment_index >= len(
-                self.segments_to_process
-            ):
-                print(f"[ERROR] Invalid segment index {self.current_segment_index}.")
-                return False
-            start_frame, end_frame = self.segments_to_process[
-                self.current_segment_index
-            ]
-            start_time_sec = start_frame / self.fps
-            end_time_sec = end_frame / self.fps
-
-        # 2. Frame Dimensions
-        frame_height, frame_width, _ = self.current_frame.shape
-        # VP-28: Apply enhancer dimension scaling for BOTH segment and default recording modes.
-        if control["FrameEnhancerEnableToggle"]:
-            if control["FrameEnhancerTypeSelection"] in (
-                "RealEsrgan-x2-Plus",
-                "BSRGan-x2",
-            ):
-                frame_height = frame_height * 2
-                frame_width = frame_width * 2
-            elif control["FrameEnhancerTypeSelection"] in (
-                "RealEsrgan-x4-Plus",
-                "BSRGan-x4",
-                "UltraSharp-x4",
-                "UltraMix-x4",
-                "RealEsr-General-x4v3",
-            ):
-                frame_height = frame_height * 4
-                frame_width = frame_width * 4
-
-        # Calculate downscale dimensions
-        frame_height_down = frame_height
-        frame_width_down = frame_width
-        if control["FrameEnhancerDownToggle"]:
-            if frame_width != 1920 or frame_height != 1080:
-                frame_width_down_mult = frame_width / 1920
-                # VP-27: Force even dimensions — most video codecs (h264/hevc) require
-                # width and height to be multiples of 2.
-                frame_height_down = math.ceil(frame_height / frame_width_down_mult) & ~1
-                frame_width_down = 1920
-            else:
-                print("[WARN] Already 1920*1080")
-
-        # 3. Output File Path and Logging
-        if is_segment:
-            segment_num = self.current_segment_index + 1
-            print(
-                f"[INFO] Creating FFmpeg (Segment {segment_num}): Video Dim={frame_width}x{frame_height}, FPS={self.fps}, Output='{output_filename}'"
-            )
-            print(
-                f"[INFO] Audio Segment: Start={start_time_sec:.3f}s, End={end_time_sec:.3f}s (Frames {start_frame}-{end_frame})"
-            )
-
-            if Path(output_filename).is_file():
-                try:
-                    os.remove(output_filename)
-                except OSError as e:
-                    print(
-                        f"[WARN] Could not remove existing segment file {output_filename}: {e}"
-                    )
-        else:
-            # Default-style: create a unique temp file
-            date_and_time = datetime.now().strftime(r"%Y_%m_%d_%H_%M_%S")
             try:
-                base_temp_dir = os.path.join(os.getcwd(), "temp_files", "default")
-                os.makedirs(base_temp_dir, exist_ok=True)
+                _cutoff = time.time() - 86400  # 24 hours
+                for _stale in Path(base_temp_dir).glob("temp_output_*.mp4"):
+                    try:
+                        if _stale.stat().st_mtime < _cutoff:
+                            _stale.unlink()
+                            print(f"[INFO] Removed stale temp file: {_stale.name}")
+                    except OSError:
+                        pass
 
-                # Clean up orphaned temp files from previous crashed sessions.
-                # These are left behind when the application exits uncleanly during
-                # a recording.  Only remove files older than 24 hours to avoid
-                # accidentally deleting files from a recording that is still active
-                # in another instance.
-                try:
-                    _cutoff = time.time() - 86400  # 24 hours
-                    for _stale in Path(base_temp_dir).glob("temp_output_*.mp4"):
+                _stale_audio_dir = Path(base_temp_dir) / "temp_audio"
+                if _stale_audio_dir.is_dir():
+                    for _stale_audio_file in _stale_audio_dir.iterdir():
                         try:
-                            if _stale.stat().st_mtime < _cutoff:
-                                _stale.unlink()
-                                print(f"[INFO] Removed stale temp file: {_stale.name}")
+                            if _stale_audio_file.stat().st_mtime < _cutoff:
+                                if _stale_audio_file.is_dir():
+                                    import shutil
+
+                                    shutil.rmtree(_stale_audio_file, ignore_errors=True)
+                                else:
+                                    _stale_audio_file.unlink()
                         except OSError:
                             pass
+            except Exception:
+                pass  # Non-critical; never block recording startup
 
-                    _stale_audio_dir = Path(base_temp_dir) / "temp_audio"
-                    if _stale_audio_dir.is_dir():
-                        for _stale_audio_file in _stale_audio_dir.iterdir():
-                            try:
-                                if _stale_audio_file.stat().st_mtime < _cutoff:
-                                    if _stale_audio_file.is_dir():
-                                        shutil.rmtree(
-                                            _stale_audio_file, ignore_errors=True
-                                        )
-                                    else:
-                                        _stale_audio_file.unlink()
-                                    print(
-                                        f"[INFO] Removed stale temp audio artifact: {_stale_audio_file.name}"
-                                    )
-                            except OSError:
-                                pass
-
-                        try:
-                            next(_stale_audio_dir.iterdir())
-                        except StopIteration:
-                            try:
-                                _stale_audio_dir.rmdir()
-                                print("[INFO] Removed empty stale temp audio directory")
-                            except OSError:
-                                pass
-                except Exception:
-                    pass  # Non-critical; never block recording startup
-
-                self.temp_file = os.path.join(
-                    base_temp_dir, f"temp_output_{date_and_time}.mp4"
-                )
-                print(f"[INFO] Default temp file will be created at: {self.temp_file}")
-            except Exception as e:
-                print(f"[ERROR] Failed to create temporary directory/file path: {e}")
-                self.temp_file = f"temp_output_{date_and_time}.mp4"
-                print(
-                    f"[WARN] Falling back to local directory for temp file: {self.temp_file}"
-                )
-
-            print(
-                f"[INFO] Creating FFmpeg : Video Dim={frame_width}x{frame_height}, FPS={self.fps}, Temp Output='{self.temp_file}'"
-            )
-
-            if Path(self.temp_file).is_file():
-                try:
-                    os.remove(self.temp_file)
-                except OSError as e:
-                    print(
-                        f"[WARN] Could not remove existing temp file {self.temp_file}: {e}"
-                    )
-
-        # 4. Build FFmpeg Arguments
-        hdrpreset = control["FFPresetsHDRSelection"]
-        sdrpreset = control["FFPresetsSDRSelection"]
-        ffquality = int(control["FFQualitySlider"])
-        ffspatial = int(control["FFSpatialAQToggle"])
-        fftemporal = int(control["FFTemporalAQToggle"])
-
-        output_width_for_quality = (
-            frame_width_down if control["FrameEnhancerDownToggle"] else frame_width
-        )
-        output_height_for_quality = (
-            frame_height_down if control["FrameEnhancerDownToggle"] else frame_height
-        )
-
-        source_metrics: Mapping[str, Any] | None = None
-        if bool(control.get("FFAutoMatchSourceQualityToggle", False)):
-            media_path = self.media_path or ""
-            source_metrics_cache = getattr(self, "_source_metrics_cache", None)
-            if source_metrics_cache is None:
-                source_metrics_cache = {}
-                setattr(self, "_source_metrics_cache", source_metrics_cache)
-            source_metrics = source_metrics_cache.get(media_path)
-            if source_metrics is None:
-                source_metrics = self._probe_source_video_metrics(media_path)
-                source_metrics_cache[media_path] = source_metrics
-
-        ffquality = self._get_adaptive_recording_quality(
-            control,
-            ffquality,
-            output_width_for_quality,
-            output_height_for_quality,
-            source_metrics=source_metrics,
-            output_fps=self.fps,
-        )
-
-        # Base args: read raw video from stdin.
-        # VP-12: Frames written to stdin are in BGR24 byte order.
-        # FrameWorker returns numpy arrays in BGR channel order (OpenCV convention).
-        # display_next_frame writes frame.tobytes() directly, so the pixel format
-        # passed to FFmpeg MUST remain "bgr24" to match the raw bytes.
-        args = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "bgr24",  # The processed frame from FrameWorker is BGR
-            "-s",
-            f"{frame_width}x{frame_height}",
-            "-r",
-            str(self.fps),
-            "-i",
-            "pipe:0",  # Read from stdin
-        ]
-
-        if is_segment:
-            # For segments, add the audio source and time limits
-            args.extend(
-                [
-                    "-ss",
-                    str(start_time_sec),
-                    "-to",
-                    str(end_time_sec),
-                    "-i",
-                    self.media_path,
-                    "-map",
-                    "0:v:0",  # Map video from stdin
-                    "-map",
-                    "1:a:0?",  # Map audio from media_path (if exists)
-                    "-c:a",
-                    "aac",
-                    "-shortest",
-                ]
-            )
-
-        # Video codec args
-        if control["HDREncodeToggle"]:
-            # HDR uses X265
-            args.extend(
-                [
-                    "-c:v",
-                    "libx265",
-                    "-profile:v",
-                    "main10",
-                    "-preset",
-                    str(hdrpreset),
-                    "-pix_fmt",
-                    "yuv420p10le",
-                    "-x265-params",
-                    f"crf={ffquality}:vbv-bufsize=10000:vbv-maxrate=10000:selective-sao=0:no-sao=1:strong-intra-smoothing=0:rect=0:aq-mode={ffspatial}:t-aq={fftemporal}:hdr-opt=1:repeat-headers=1:colorprim=bt2020:range=limited:transfer=smpte2084:colormatrix=bt2020nc:master-display='G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)':max-cll=1000,400",
-                ]
-            )
-        else:
-            # NVENC for SDR
-            args.extend(
-                [
-                    "-c:v",
-                    "hevc_nvenc",
-                    "-preset",
-                    str(sdrpreset),
-                    "-profile:v",
-                    "main10",
-                    "-cq",
-                    str(ffquality),
-                    "-pix_fmt",
-                    "yuv420p10le",
-                    "-colorspace",
-                    "rgb",
-                    "-color_primaries",
-                    "bt709",
-                    "-color_trc",
-                    "bt709",
-                    "-spatial-aq",
-                    str(ffspatial),
-                    "-temporal-aq",
-                    str(fftemporal),
-                    "-tier",
-                    "high",
-                    "-tag:v",
-                    "hvc1",
-                ]
-            )
-
-        target_matrix = "bt2020nc" if control["HDREncodeToggle"] else "bt709"
-        scale_params = f"in_range=pc:out_range=tv:out_color_matrix={target_matrix}"
-
-        if control["FrameEnhancerDownToggle"]:
-            args.extend(
-                [
-                    "-vf",
-                    f"scale={frame_width_down}x{frame_height_down}:{scale_params}:flags=lanczos+accurate_rnd+full_chroma_int",
-                ]
-            )
-        else:
-            args.extend(
-                [
-                    "-vf",
-                    f"scale={scale_params}",
-                ]
-            )
-
-        # Output file
-        if is_segment:
-            args.extend([output_filename])
-        else:
-            args.extend([self.temp_file])
-
-        # 5. Start Subprocess
-        try:
-            self.recording_sp = subprocess.Popen(
-                args, stdin=subprocess.PIPE, bufsize=-1
-            )
-            # reset write counters each time we start a new FFmpeg session
-            self.frames_written = 0
-            self.last_displayed_frame = None
-            return True
-        except FileNotFoundError:
-            print(
-                "[ERROR] FFmpeg command not found. Ensure FFmpeg is installed and in system PATH."
-            )
-            self.main_window.display_messagebox_signal.emit(
-                "FFmpeg Error", "FFmpeg command not found.", self.main_window
-            )
-            return False
+            temp_path = os.path.join(base_temp_dir, f"temp_output_{date_and_time}.mp4")
+            print(f"[INFO] Default temp file will be created at: {temp_path}")
+            return temp_path
         except Exception as e:
-            print(f"[ERROR] Failed to start FFmpeg subprocess : {e}")
-            if is_segment:
-                self.main_window.display_messagebox_signal.emit(
-                    "FFmpeg Error",
-                    f"Failed to start FFmpeg for segment {segment_num}:\n{e}",
-                    self.main_window,
-                )
-            else:
-                self.main_window.display_messagebox_signal.emit(
-                    "FFmpeg Error", f"Failed to start FFmpeg:\n{e}", self.main_window
-                )
-            return False
+            print(f"[ERROR] Failed to create temporary directory/file path: {e}")
+            return f"temp_output_{date_and_time}.mp4"
 
     def _identify_frame_segments(self, actual_end_frame: int) -> List[Tuple[int, int]]:
         """
@@ -3712,211 +3215,6 @@ class VideoProcessor(QObject):
             )
             misc_helpers.release_capture(capture)
 
-    def _extract_audio_segments(
-        self, segments: List[Tuple[int, int]], temp_audio_dir: str
-    ) -> Tuple[bool, List[str]]:
-        """
-        Extract audio from the original media for each frame segment.
-
-        Returns: (success: bool, audio_files: List[str])
-            - success: True if all segments extracted successfully
-            - audio_files: List of paths to extracted audio files
-        """
-        audio_files = []
-
-        for idx, (start_frame, end_frame) in enumerate(segments):
-            # Convert frame numbers to time (seconds)
-            start_time = start_frame / self.fps if self.fps > 0 else 0
-            # end_time is exclusive (one frame after the last frame we want)
-            end_time = (end_frame + 1) / self.fps if self.fps > 0 else 0
-
-            # Skip empty segments (should not happen with our segment identification, but safety check)
-            if start_time >= end_time:
-                print(
-                    f"[WARN] Skipping empty audio segment {idx + 1} (start_time={start_time:.3f}s >= end_time={end_time:.3f}s)"
-                )
-                continue
-
-            # Use a containerized AAC output rather than raw ADTS .aac.
-            # Raw AAC concatenation is brittle on some skipped-frame rebuilds,
-            # especially for MKV-derived inputs with awkward timestamps.
-            audio_file = os.path.join(temp_audio_dir, f"audio_segment_{idx:04d}.m4a")
-            audio_files.append(audio_file)
-
-            # Always normalize skipped-frame rebuild audio to AAC-in-M4A.
-            # This keeps the concat/remux path codec-agnostic for any source
-            # audio format that FFmpeg can decode from the input media.
-            media_path: str = self.media_path  # type: ignore[assignment]
-            args: list[str] = [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "warning",
-                "-err_detect",
-                "ignore_err",
-                "-i",
-                media_path,
-                "-ss",
-                str(start_time),
-                "-to",
-                str(end_time),
-                "-vn",
-                "-map",
-                "0:a:0?",
-                "-af",
-                "aresample=async=1:first_pts=0",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",
-                "-y",
-                audio_file,
-            ]
-
-            try:
-                print(
-                    f"[INFO] Extracting audio segment {idx + 1}/{len(segments)}: {start_time:.3f}s → {end_time:.3f}s"
-                )
-                subprocess.run(args, check=True, capture_output=True, text=True)
-
-                # Validate output; if it's not valid, retry once with the same
-                # normalized extraction settings to rule out a transient failure.
-                if not self._validate_audio_file(audio_file):
-                    print(
-                        f"[WARN] Validation failed for segment {idx + 1}, retrying extraction once"
-                    )
-                    re_args: list[str] = [
-                        "ffmpeg",
-                        "-hide_banner",
-                        "-loglevel",
-                        "warning",
-                        "-err_detect",
-                        "ignore_err",
-                        "-i",
-                        media_path,
-                        "-ss",
-                        str(start_time),
-                        "-to",
-                        str(end_time),
-                        "-vn",
-                        "-map",
-                        "0:a:0?",
-                        "-af",
-                        "aresample=async=1:first_pts=0",
-                        "-c:a",
-                        "aac",
-                        "-b:a",
-                        "192k",
-                        "-y",
-                        audio_file,
-                    ]
-                    try:
-                        subprocess.run(
-                            re_args, check=True, capture_output=True, text=True
-                        )
-                    except subprocess.CalledProcessError as e2:
-                        print(
-                            f"[ERROR] Retry extraction failed for segment {idx + 1}: {e2}"
-                        )
-                        print(f"[ERROR] FFmpeg stderr: {e2.stderr}")
-                        for audio in audio_files:
-                            try:
-                                os.remove(audio)
-                            except OSError:
-                                pass
-                        return False, []
-                    if not self._validate_audio_file(audio_file):
-                        print(
-                            f"[ERROR] Retried segment {idx + 1} is still invalid after validation"
-                        )
-                        for audio in audio_files:
-                            try:
-                                os.remove(audio)
-                            except OSError:
-                                pass
-                        return False, []
-
-                print(f"[INFO] Segment {idx + 1} extracted successfully")
-            except subprocess.CalledProcessError as e:
-                print(f"[ERROR] Failed to extract audio segment {idx + 1}: {e}")
-                print(f"[ERROR] FFmpeg stderr: {e.stderr}")
-                print(f"[ERROR] FFmpeg command: {' '.join(args)}")
-                # Cleanup partial files
-                for audio in audio_files:
-                    try:
-                        os.remove(audio)
-                    except OSError:
-                        pass
-                return False, []
-            except FileNotFoundError:
-                print("[ERROR] FFmpeg not found. Cannot extract audio segments.")
-                return False, []
-
-        print(f"[INFO] All {len(segments)} audio segment(s) extracted successfully")
-        return True, audio_files
-
-    def _validate_audio_file(self, audio_file_path: str) -> bool:
-        """
-        Validate that an audio file can be properly decoded by FFmpeg.
-        Returns True if audio is valid, False if corrupted.
-        """
-        if not os.path.exists(audio_file_path):
-            print(f"[ERROR] Audio file does not exist: {audio_file_path}")
-            return False
-
-        try:
-            # Try to probe the audio file with ffprobe
-            args = [
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-show_format",
-                "-show_streams",
-                audio_file_path,
-            ]
-            result = subprocess.run(args, capture_output=True, text=True, timeout=30)
-
-            if result.returncode != 0:
-                print(f"[WARN] ffprobe failed for {audio_file_path}: {result.stderr}")
-                return False
-
-            # Check if we got valid JSON output
-            import json
-
-            probe_data = json.loads(result.stdout)
-
-            # Check if there's an audio stream
-            audio_streams = [
-                s
-                for s in probe_data.get("streams", [])
-                if s.get("codec_type") == "audio"
-            ]
-            if not audio_streams:
-                print(f"[WARN] No audio stream found in {audio_file_path}")
-                return False
-
-            # Check duration
-            format_info = probe_data.get("format", {})
-            duration = format_info.get("duration")
-            if duration is None or float(duration) <= 0:
-                print(f"[WARN] Invalid or zero duration in {audio_file_path}")
-                return False
-
-            print(f"[INFO] Audio validation passed: {duration}s duration")
-            return True
-
-        except subprocess.TimeoutExpired:
-            print(f"[WARN] Audio validation timed out for {audio_file_path}")
-            return False
-        except json.JSONDecodeError:
-            print(f"[WARN] Invalid ffprobe output for {audio_file_path}")
-            return False
-        except Exception as e:
-            print(f"[WARN] Audio validation failed for {audio_file_path}: {e}")
-            return False
-
     def _probe_video_duration(self, file_path: str) -> float | None:
         """
         Return the duration (in seconds) of the video file at `file_path` using
@@ -3972,156 +3270,14 @@ class VideoProcessor(QObject):
 
         return play_end, end_frame, frames_processed, duration
 
-    def _concatenate_audio_segments(
-        self, audio_files: List[str], temp_audio_dir: str
-    ) -> Optional[str]:
-        """
-        Concatenate multiple audio files into a single audio file using FFmpeg concat demuxer.
-
-        Returns: Path to concatenated audio file, or None if failed
-        """
-
-        if not audio_files:
-            print("[ERROR] No audio segments to concatenate")
-            return None
-
-        if len(audio_files) == 1:
-            # Only one segment, return it directly
-            print("[INFO] Only one audio segment, no concatenation needed")
-            return audio_files[0]
-
-        # Create concat manifest file
-        concat_file = os.path.join(temp_audio_dir, "concat_manifest.txt")
-        try:
-            with open(concat_file, "w") as f:
-                for audio_file in audio_files:
-                    # FFmpeg concat demuxer expects absolute paths
-                    abs_path = os.path.abspath(audio_file)
-                    formatted_path = abs_path.replace("\\", "/")
-                    f.write(f"file '{formatted_path}'\n")
-            print(f"[INFO] Created concat manifest with {len(audio_files)} segments")
-        except OSError as e:
-            print(f"[ERROR] Failed to create concat manifest: {e}")
-            return None
-
-        output_audio = os.path.join(temp_audio_dir, "audio_concatenated.m4a")
-
-        # FFmpeg concat demuxer command
-        args = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "concat",
-            "-safe",
-            "0",  # Allow absolute filenames
-            "-i",
-            concat_file,
-            "-vn",
-            # Re-encode once here to flatten the segment timestamps into a
-            # single monotonic audio stream before the final mux.
-            "-af",
-            "aresample=async=1:first_pts=0",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-y",
-            output_audio,
-        ]
-
-        try:
-            print(f"[INFO] Concatenating {len(audio_files)} audio segment(s)...")
-            subprocess.run(args, check=True)
-            print("[INFO] ✓ Successfully concatenated audio segments")
-            return output_audio
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] Failed to concatenate audio segments: {e}")
-            print(f"[ERROR] FFmpeg command: {' '.join(args)}")
-            return None
-        except FileNotFoundError:
-            print("[ERROR] FFmpeg not found. Cannot concatenate audio.")
-            return None
-
-    def _write_video_only_output(self, source_video: str, output_video: str) -> bool:
-        """Fallback writer: produce a playable video-only output when audio handling fails."""
-        if not source_video or not os.path.exists(source_video):
-            print(f"[ERROR] Video-only fallback source missing: {source_video}")
-            return False
-
-        if output_video and os.path.exists(output_video):
-            try:
-                os.remove(output_video)
-            except OSError:
-                pass
-
-        args = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            source_video,
-            "-map",
-            "0:v:0",
-            "-c:v",
-            "copy",
-            "-an",
-            "-y",
-            output_video,
-        ]
-
-        try:
-            subprocess.run(args, check=True)
-            print(
-                f"[WARN] Audio processing failed; emitted video-only output: {output_video}"
-            )
-            return True
-        except Exception as e:
-            print(f"[ERROR] Video-only remux fallback failed: {e}")
-            return False
-
-    def _concatenate_segments_video_only(
-        self, list_file_path: str, final_file_path: str
-    ) -> bool:
-        """Fallback concatenation for segment mode when audio concat fails."""
-        args = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            list_file_path,
-            "-map",
-            "0:v:0",
-            "-c:v",
-            "copy",
-            "-an",
-            "-y",
-            final_file_path,
-        ]
-
-        try:
-            subprocess.run(args, check=True)
-            print(
-                f"[WARN] Segment audio concat failed; emitted video-only output: {final_file_path}"
-            )
-            return True
-        except Exception as e:
-            print(f"[ERROR] Segment video-only fallback concat failed: {e}")
-            return False
-
     def _attempt_segment_video_only_fallback(
         self, list_file_path: str, final_file_path: str, failure_message: str
     ) -> bool:
         """Try segment video-only concat fallback and show UI error if it fails."""
         print("[WARN] Attempting segment video-only fallback concatenation...")
-        if self._concatenate_segments_video_only(list_file_path, final_file_path):
+        if FFmpegPostProcessor.concatenate_segments_video_only(
+            list_file_path, final_file_path
+        ):
             return True
 
         self.main_window.display_messagebox_signal.emit(
@@ -4180,8 +3336,11 @@ class VideoProcessor(QObject):
                 f"[INFO] Segment {segment_num}: rebuilding audio for skipped frames "
                 f"(manual dropped={self.manual_dropped_skip_count}, read errors={self.read_error_skip_count})."
             )
-            audio_ok, audio_files = self._extract_audio_segments(
-                keep_segments, temp_audio_dir
+            audio_ok, audio_files = FFmpegPostProcessor.extract_audio_segments(
+                media_path=str(self.media_path),
+                fps=self.fps,
+                segments=keep_segments,
+                temp_audio_dir=temp_audio_dir,
             )
             if not (audio_ok and audio_files):
                 print(
@@ -4189,8 +3348,8 @@ class VideoProcessor(QObject):
                 )
                 return
 
-            corrected_audio = self._concatenate_audio_segments(
-                audio_files, temp_audio_dir
+            corrected_audio = FFmpegPostProcessor.concatenate_audio_segments(
+                audio_files=audio_files, temp_audio_dir=temp_audio_dir
             )
             if not corrected_audio:
                 print(
@@ -4281,36 +3440,16 @@ class VideoProcessor(QObject):
             print("[INFO] Worker threads joined.")
 
             # 6. Finalize FFmpeg (close stdin, wait for file to be written)
-            if self.recording_sp:
-                if self.recording_sp.stdin and not self.recording_sp.stdin.closed:
-                    try:
-                        print("[INFO] Closing FFmpeg stdin...")
-                        self.recording_sp.stdin.close()
-                    except OSError as e:
-                        print(
-                            f"[WARN] Error closing FFmpeg stdin during finalization: {e}"
-                        )
+            if self.encoder.is_running():
+                print("[INFO] Closing FFmpeg encoder...")
                 # VP-29: Mark recording stopped early.
                 self.recording = False
-                print("[INFO] Waiting for FFmpeg subprocess to finish writing...")
-                try:
-                    self.recording_sp.wait(timeout=10)
-                    print("[INFO] FFmpeg subprocess finished.")
-                except subprocess.TimeoutExpired:
-                    print(
-                        "[WARN] FFmpeg subprocess timed out during finalization, killing."
-                    )
-                    self.recording_sp.kill()
-                    self.recording_sp.wait()
-                except Exception as e:
-                    print(
-                        f"[ERROR] Error waiting for FFmpeg subprocess during finalization: {e}"
-                    )
-                self.recording_sp = None
+
+                # Safely close the pipe and wait for the file to finalize
+                self.encoder.close_process()
+
                 # VP-HEVC-INFO: Notify the user about Windows Explorer thumbnail
-                # support for HEVC outputs. Default codec is hevc_nvenc / libx265,
-                # both produce H.265 streams that Windows 10 does NOT thumbnail
-                # natively without the "HEVC Video Extensions" Store package.
+                # support for HEVC outputs. Default codec is hevc_nvenc / libx265.
                 self._log_hevc_thumbnail_hint_once()
 
             # 7. Calculate audio segment times
@@ -4435,14 +3574,21 @@ class VideoProcessor(QObject):
                                 f"invalid frame boundaries: start={start_frame_for_calc}, end={actual_end_frame}"
                             )
                         segments = self._identify_frame_segments(actual_end_frame)
-                        audio_ok, audio_files = self._extract_audio_segments(
-                            segments, temp_audio_dir
+                        audio_ok, audio_files = (
+                            FFmpegPostProcessor.extract_audio_segments(
+                                media_path=str(self.media_path),
+                                fps=self.fps,
+                                segments=segments,
+                                temp_audio_dir=temp_audio_dir,
+                            )
                         )
                         if not audio_ok or not audio_files:
                             raise RuntimeError("failed to extract segmented audio")
 
-                        final_audio_path = self._concatenate_audio_segments(
-                            audio_files, temp_audio_dir
+                        final_audio_path = (
+                            FFmpegPostProcessor.concatenate_audio_segments(
+                                audio_files=audio_files, temp_audio_dir=temp_audio_dir
+                            )
                         )
                         if not final_audio_path:
                             raise RuntimeError("failed to concatenate segmented audio")
@@ -4504,8 +3650,8 @@ class VideoProcessor(QObject):
                         print(
                             "[WARN] Falling back to video-only output for default-style recording."
                         )
-                        if not self._write_video_only_output(
-                            self.temp_file, final_file_path
+                        if not FFmpegPostProcessor.write_video_only_output(
+                            source_video=self.temp_file, output_video=final_file_path
                         ):
                             self.main_window.display_messagebox_signal.emit(
                                 "Recording Error",
@@ -4863,13 +4009,30 @@ class VideoProcessor(QObject):
             self.worker_threads.append(worker)
 
         # 6. Setup FFmpeg subprocess for this segment
-        # create_ffmpeg_subprocess uses self.current_frame.shape, so it will automatically
-        # pick up the resized dimensions we set in step 4.
         temp_segment_filename = f"segment_{self.current_segment_index:03d}.mp4"
         temp_segment_path = os.path.join(self.segment_temp_dir, temp_segment_filename)
         self.temp_segment_files.append(temp_segment_path)
 
-        if not self.create_ffmpeg_subprocess(output_filename=temp_segment_path):
+        frame_height, frame_width, _ = self.current_frame.shape
+        start_frame, end_frame = self.segments_to_process[self.current_segment_index]
+
+        # Calculate time boundaries for audio extraction mapping
+        start_time_sec = start_frame / self.fps if self.fps > 0 else 0.0
+        end_time_sec = end_frame / self.fps if self.fps > 0 else 0.0
+
+        success = self.encoder.start_process(
+            output_filename=temp_segment_path,
+            frame_width=frame_width,
+            frame_height=frame_height,
+            fps=self.fps,
+            control=self.main_window.control,
+            is_segment=True,
+            media_path=self.media_path,
+            start_time_sec=start_time_sec,
+            end_time_sec=end_time_sec,
+        )
+
+        if not success:
             print(
                 f"[ERROR] Failed to create ffmpeg subprocess for segment {segment_num}. Aborting."
             )
@@ -4960,35 +4123,14 @@ class VideoProcessor(QObject):
         self.frames_to_display.clear()
 
         # 3. Finalize FFmpeg for this segment
-        if self.recording_sp:
-            if self.recording_sp.stdin and not self.recording_sp.stdin.closed:
-                try:
-                    print(f"[INFO] Closing FFmpeg stdin for segment {segment_num}...")
-                    self.recording_sp.stdin.close()
-                except OSError as e:
-                    print(
-                        f"[WARN] Error closing FFmpeg stdin for segment {segment_num}: {e}"
-                    )
+        if self.encoder.is_running():
             print(
-                f"[INFO] Waiting for FFmpeg subprocess (segment {segment_num}) to finish writing..."
+                f"[INFO] Closing and waiting for active FFmpeg encoder (segment {segment_num})..."
             )
-            try:
-                self.recording_sp.wait(timeout=10)
-                print(f"[INFO] FFmpeg subprocess (segment {segment_num}) finished.")
-            except subprocess.TimeoutExpired:
-                print(
-                    f"[WARN] FFmpeg subprocess (segment {segment_num}) timed out, killing."
-                )
-                self.recording_sp.kill()
-                self.recording_sp.wait()
-            except Exception as e:
-                print(
-                    f"[ERROR] Error waiting for FFmpeg subprocess (segment {segment_num}): {e}"
-                )
-            self.recording_sp = None
+            self.encoder.close_process()
         else:
             print(
-                f"[WARN] No active FFmpeg subprocess found when stopping segment {segment_num}."
+                f"[WARN] No active FFmpeg encoder found when stopping segment {segment_num}."
             )
 
         if self.temp_segment_files and not os.path.exists(self.temp_segment_files[-1]):
@@ -5015,32 +4157,12 @@ class VideoProcessor(QObject):
             )
 
         # Failsafe: If this is called while an ffmpeg process is still running
-        if self.recording_sp:
+        if self.encoder.is_running():
             segment_num = self.current_segment_index + 1
             print(
                 f"[INFO] Finalizing: Stopping active FFmpeg process for segment {segment_num}..."
             )
-            if self.recording_sp.stdin and not self.recording_sp.stdin.closed:
-                try:
-                    self.recording_sp.stdin.close()
-                except OSError as e:
-                    print(
-                        f"[WARN] Error closing FFmpeg stdin during early finalization: {e}"
-                    )
-            try:
-                self.recording_sp.wait(timeout=10)
-                print(
-                    f"[INFO] FFmpeg subprocess (segment {segment_num}) finished writing."
-                )
-            except subprocess.TimeoutExpired:
-                print(
-                    f"[WARN] FFmpeg subprocess (segment {segment_num}) timed out, killing."
-                )
-                self.recording_sp.kill()
-                self.recording_sp.wait()
-            except Exception as e:
-                print(f"[ERROR] Error waiting for FFmpeg subprocess: {e}")
-            self.recording_sp = None
+            self.encoder.close_process()
 
         was_triggered_by_job = self.triggered_by_job_manager
 
