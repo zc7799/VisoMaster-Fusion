@@ -311,6 +311,7 @@ class FrameEdits:
             ):
                 """
                 Helper to calculate motion with 'Smart Dynamic Boost' and 'Neutral Factor'.
+                Refactored to solve Gaze Drift and Eyelid Jitter globally.
                 """
                 delta_local = x_s_info["exp"].clone()
 
@@ -325,13 +326,21 @@ class FrameEdits:
                     # Calculate the raw difference (motion intent)
                     raw_diff = driving_exp[:, indices, :] - ref_part
 
-                    # --- SMART DYNAMIC BOOST ---
+                    # --- SMART DYNAMIC BOOST (Fixed Jitter) ---
                     boost_val = micro_expression_boost if use_boost else 1.0
 
                     if use_boost and boost_val > 1.0:
                         magnitude = torch.abs(raw_diff)
+
+                        # 1. Decay: Prevents distortion on strong/large expressions
                         decay = torch.exp(-10.0 * magnitude)
-                        dynamic_scale = 1.0 + (boost_val - 1.0) * decay
+
+                        # 2. Noise Gate : Prevents boosting microscopic tracking noise.
+                        # Ramps up from 0 to 1 between 0.000 and 0.005 magnitude.
+                        # This stops the high-frequency eyelid trembling.
+                        noise_gate = torch.clamp(magnitude / 0.005, 0.0, 1.0)
+
+                        dynamic_scale = 1.0 + (boost_val - 1.0) * decay * noise_gate
                         diff = raw_diff * dynamic_scale
                     else:
                         diff = raw_diff * boost_val
@@ -340,6 +349,21 @@ class FrameEdits:
                     diff = diff * neutral_factor
 
                     delta_local[:, indices, :] = x_s_info["exp"][:, indices, :] + diff
+
+                    # --- GLOBAL GAZE STABILIZATION (X-AXIS) ---
+                    # 11 and 15 are the explicit latent indices controlling the horizontal iris position
+                    if 11 in indices and 15 in indices:
+                        gaze_dampening = (
+                            0.50  # Dampen horizontal motion to preserve native IPD
+                        )
+                        idx_11, idx_15 = indices.index(11), indices.index(15)
+                        delta_local[:, 11, 0] = x_s_info["exp"][:, 11, 0] + (
+                            diff[:, idx_11, 0] * gaze_dampening
+                        )
+                        delta_local[:, 15, 0] = x_s_info["exp"][:, 15, 0] + (
+                            diff[:, idx_15, 0] * gaze_dampening
+                        )
+
                 else:
                     # Absolute Motion
                     target_exp = driving_exp[:, indices, :]
@@ -348,6 +372,23 @@ class FrameEdits:
                     delta_local[:, indices, :] = (
                         current_exp * (1 - neutral_factor) + target_exp * neutral_factor
                     )
+
+                    # --- GLOBAL GAZE STABILIZATION (X-AXIS) ---
+                    if 11 in indices and 15 in indices:
+                        idx_11, idx_15 = indices.index(11), indices.index(15)
+                        gaze_x_blend = (
+                            0.60  # Blend absolute X with the target's native X
+                        )
+                        delta_local[:, 11, 0] = torch.lerp(
+                            current_exp[:, idx_11, 0],
+                            target_exp[:, idx_11, 0],
+                            gaze_x_blend,
+                        )
+                        delta_local[:, 15, 0] = torch.lerp(
+                            current_exp[:, idx_15, 0],
+                            target_exp[:, idx_15, 0],
+                            gaze_x_blend,
+                        )
 
                 # Projection & Refinement
                 x_proj = scale_anchor * (x_c_s @ R_anchor + delta_local) + t_anchor
@@ -360,8 +401,10 @@ class FrameEdits:
                 return (x_target - x_s) * multiplier
 
             def merge_eye_motion_candidates(
-                relative_motion, absolute_motion, normalize_eyes_enabled=False
-            ):
+                relative_motion: torch.Tensor,
+                absolute_motion: torch.Tensor,
+                normalize_eyes_enabled: bool = False,
+            ) -> torch.Tensor:
                 """
                 Relative Lids + Retargeted Gaze eye merge:
                 - keep horizontal gaze direction from the absolute + retargeted eye motion
@@ -371,10 +414,16 @@ class FrameEdits:
                 """
                 merged_motion = relative_motion.clone()
 
-                # Landmark 11/15 X is the clearest eyeball-direction signal.
-                # Keep it fully from the absolute + retargeted branch for better gaze stability.
-                merged_motion[:, 11, 0] = absolute_motion[:, 11, 0]
-                merged_motion[:, 15, 0] = absolute_motion[:, 15, 0]
+                # --- GAZE PRECISION (X-Axis) ---
+                # 50% Absolute provides enough authority to direct the iris precisely,
+                # while leaving 50% Relative to prevent IPD tearing on profile angles.
+                gaze_blend = 0.50
+                merged_motion[:, 11, 0] = torch.lerp(
+                    relative_motion[:, 11, 0], absolute_motion[:, 11, 0], gaze_blend
+                )
+                merged_motion[:, 15, 0] = torch.lerp(
+                    relative_motion[:, 15, 0], absolute_motion[:, 15, 0], gaze_blend
+                )
 
                 # Vertical eye motion carries both lid state and some gaze drift.
                 # Blend a limited amount of the retargeted branch back in so the
@@ -383,17 +432,29 @@ class FrameEdits:
                 eyelid_blend = 0.45 if normalize_eyes_enabled else 0.30
                 eye_center_blend = 0.35 if normalize_eyes_enabled else 0.20
 
+                # 11, 15: Eye Centers (Iris vertical position & depth)
                 for idx in (11, 15):
                     merged_motion[:, idx, 1] = torch.lerp(
                         relative_motion[:, idx, 1],
                         absolute_motion[:, idx, 1],
                         eye_center_blend,
                     )
+                    merged_motion[:, idx, 2] = torch.lerp(
+                        relative_motion[:, idx, 2],
+                        absolute_motion[:, idx, 2],
+                        eye_center_blend,
+                    )
 
+                # 13, 16: Eyelids (Blink & Squint)
                 for idx in (13, 16):
                     merged_motion[:, idx, 1] = torch.lerp(
                         relative_motion[:, idx, 1],
                         absolute_motion[:, idx, 1],
+                        eyelid_blend,
+                    )
+                    merged_motion[:, idx, 2] = torch.lerp(
+                        relative_motion[:, idx, 2],
+                        absolute_motion[:, idx, 2],
                         eyelid_blend,
                     )
 
@@ -600,9 +661,11 @@ class FrameEdits:
 
                 if flag_activate_lips:
                     lips_retarget_delta = 0
-                    if parameters.get(
+                    flag_retarget_lips = parameters.get(
                         "FaceExpressionRetargetingLipsBothEnableToggle", False
-                    ):
+                    )
+
+                    if flag_retarget_lips:
                         lip_mult = parameters.get(
                             "FaceExpressionRetargetingLipsMultiplierBothDecimalSlider",
                             1.0,
@@ -614,15 +677,59 @@ class FrameEdits:
                             x_s, c_d_lip * lip_mult, face_editor_type
                         )
 
-                    accumulated_motion += get_component_motion(
-                        lip_indices,
-                        x_d_i_info["exp"],
-                        driving_multiplier_lips,
-                        extra_delta=lips_retarget_delta,
-                        is_relative=flag_relative_lips,
-                        neutral_ref=lp_lip_array,
-                        use_boost=True,
-                    )
+                    if flag_relative_lips and flag_retarget_lips:
+                        # 1. Pure Relative Branch: Captures shape (smirk, width, pout) on X-axis
+                        relative_lip_motion = get_component_motion(
+                            lip_indices,
+                            x_d_i_info["exp"],
+                            1.0,
+                            extra_delta=0,  # No retargeting here
+                            is_relative=True,
+                            neutral_ref=lp_lip_array,
+                            use_boost=True,
+                        )
+
+                        # 2. Pure Absolute Branch: Captures precise jaw drop and mouth opening on Y/Z-axis
+                        absolute_retarget_lip_motion = get_component_motion(
+                            lip_indices,
+                            x_d_i_info["exp"],
+                            1.0,
+                            extra_delta=lips_retarget_delta,
+                            is_relative=False,
+                            neutral_ref=lp_lip_array,
+                            use_boost=True,
+                        )
+
+                        # 3. Structural Decoupling Merge (Softened)
+                        # We use Lerp to blend Relative and Absolute on the Y axis.
+                        # 0.5 means 50% relative influence, 50% retargeting influence.
+                        merged_lip_motion = relative_lip_motion.clone()
+                        blend_factor = 0.50
+
+                        for idx in lip_indices:
+                            merged_lip_motion[:, idx, 1] = torch.lerp(
+                                relative_lip_motion[:, idx, 1],
+                                absolute_retarget_lip_motion[:, idx, 1],
+                                blend_factor,
+                            )
+                            merged_lip_motion[:, idx, 2] = absolute_retarget_lip_motion[
+                                :, idx, 2
+                            ]  # Depth stays absolute
+
+                        accumulated_motion += (
+                            merged_lip_motion * driving_multiplier_lips
+                        )
+                    else:
+                        # Standard behavior if only one mode (or neither) is used
+                        accumulated_motion += get_component_motion(
+                            lip_indices,
+                            x_d_i_info["exp"],
+                            driving_multiplier_lips,
+                            extra_delta=lips_retarget_delta,
+                            is_relative=flag_relative_lips,
+                            neutral_ref=lp_lip_array,
+                            use_boost=True,
+                        )
 
                 if flag_activate_brows:
                     accumulated_motion += get_component_motion(
