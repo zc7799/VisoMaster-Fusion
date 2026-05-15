@@ -943,6 +943,7 @@ def show_shortcuts(main_window: "MainWindow"):
         "<b>Ctrl+0</b> : Fit to View<br>"
         "<b>Ctrl+1</b> : 100% Zoom<br>"
         "<b>Middle Mouse Drag</b> : Pan view<br>"
+        "<b>X</b> : Face Compare<br>"
         "<b>Right Click</b> : Viewport menu (Fit to View, 100% Zoom, Save Image)<br>"
         "<br>"
     )

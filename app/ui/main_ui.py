@@ -1291,6 +1291,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         face_compare_action = QtGui.QAction("Face Compare", self.menuView)
         face_compare_action.setCheckable(True)
+        face_compare_action.setShortcut(QtGui.QKeySequence("X"))
+        face_compare_action.setShortcutContext(QtCore.Qt.ShortcutContext.WindowShortcut)
         face_compare_action.triggered.connect(
             lambda checked: (
                 self._set_compare_mode("compare", checked),
