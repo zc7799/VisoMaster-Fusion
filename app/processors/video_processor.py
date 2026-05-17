@@ -322,6 +322,11 @@ class VideoProcessor(QObject):
             del frame
             return
 
+        # Intercept wrongly arriving frames from the webcam feed
+        if self.file_type == "webcam":
+            self.store_webcam_frame_to_display(frame)
+            return
+
         # Drop stale frames arriving late from slower threads if we already scrubbed or played past them.
         # This prevents RAM bloat and keeps the metronome buffer clean.
         if self.file_type == "video" and frame_number < self.next_frame_to_display:
@@ -4660,6 +4665,7 @@ class VideoProcessor(QObject):
         self.processing = True
         self.is_processing_segments = False
         self.recording = False
+        self.start_time = time.perf_counter()
 
         # 6. Clear Containers
         self.frames_to_display.clear()
