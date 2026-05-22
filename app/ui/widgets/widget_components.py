@@ -2138,7 +2138,7 @@ class LoadLastWorkspaceDialog(QtWidgets.QDialog):
         self.countdown_seconds -= 1
         if self.countdown_seconds > 0:
             from app.ui.translations import translate
-            self.countdown_label.setText(translate(f"Auto loading in {self.countdown_seconds} seconds..."))
+            self.countdown_label.setText(f"{self.countdown_seconds} 秒后自动加载...")
         else:
             self.timer.stop()
             self.load_workspace()
