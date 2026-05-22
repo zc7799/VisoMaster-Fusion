@@ -1,0 +1,367 @@
+From e257e8ecd164cfa4e25db4b0788a3dabccec985b Mon Sep 17 00:00:00 2001
+From: zhei87 <zhei87@163.com>
+Date: Wed, 13 May 2026 19:39:29 +0800
+Subject: [PATCH 2/5] =?UTF-8?q?feat:=20=E6=B7=BB=E5=8A=A0=E4=BA=BA?=
+ =?UTF-8?q?=E8=84=B8=E6=9F=A5=E6=89=BE=E5=8A=9F=E8=83=BD=E5=92=8CUI?=
+ =?UTF-8?q?=E4=BC=98=E5=8C=96?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- 新增 FindFaceDialog 人脸查找对话框，支持拼音/汉字搜索子文件夹
+- 启动弹窗添加5秒倒计时自动加载功能
+- 添加全选人脸按钮 (selectAllFacesButton)
+- 目标/输入路径标签添加截断显示优化
+- Start.bat 添加退出时自动 conda deactivate
+---
+ Start.bat                                     |   5 +
+ app/ui/main_ui.py                             |  19 +++
+ app/ui/widgets/actions/job_manager_actions.py |  26 ++--
+ app/ui/widgets/actions/list_view_actions.py   |  35 +++++-
+ app/ui/widgets/actions/save_load_actions.py   |  28 +++--
+ app/ui/widgets/widget_components.py           | 119 +++++++++++++++++-
+ 6 files changed, 207 insertions(+), 25 deletions(-)
+
+diff --git a/Start.bat b/Start.bat
+index 950f2c6..6f29584 100644
+--- a/Start.bat
++++ b/Start.bat
+@@ -21,3 +21,8 @@ IF %EXIT_CODE% NEQ 0 (
+     echo         Review the output above for details, then press any key to close.
+     pause >nul
+ )
++
++REM Deactivate conda environment on exit (only needed when using conda)
++IF NOT EXIST ".venv" (
++    call conda deactivate
++)
+diff --git a/app/ui/main_ui.py b/app/ui/main_ui.py
+index 8598cbf..5ffe17d 100644
+--- a/app/ui/main_ui.py
++++ b/app/ui/main_ui.py
+@@ -237,6 +237,25 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
+             partial(list_view_actions.select_input_face_images, self, "folder")
+         )
+ 
++        # 修改-添加人脸查找按钮
++        self.buttonFindFace = QtWidgets.QPushButton()
++        self.buttonFindFace.setObjectName("buttonFindFace")
++        self.buttonFindFace.setFlat(True)
++        self.buttonFindFace.setIcon(QtGui.QIcon("app/ui/core/media/search.png"))
++        self.buttonFindFace.setIconSize(QtCore.QSize(18, 18))
++        self.buttonFindFace.setToolTip("查找人脸")
++        self.buttonFindFace.clicked.connect(
++            partial(list_view_actions.show_find_face_dialog, self)
++        )
++        self.horizontalLayout_Faces.addWidget(self.buttonFindFace)
++
++        # 修改-添加全选人脸按钮 (点击事件由 translations.py 的 setup_select_all_button 绑定)
++        self.selectAllFacesButton = QtWidgets.QPushButton("全选")
++        self.selectAllFacesButton.setObjectName("selectAllFacesButton")
++        self.selectAllFacesButton.setFlat(True)
++        self.selectAllFacesButton.setMaximumSize(80, 16777215)
++        self.horizontalLayout_3.insertWidget(0, self.selectAllFacesButton)
++
+         # Initialize graphics frame to view frames
+         self.scene = QtWidgets.QGraphicsScene()
+         self.graphicsViewFrame.setScene(self.scene)
+diff --git a/app/ui/widgets/actions/job_manager_actions.py b/app/ui/widgets/actions/job_manager_actions.py
+index fe56a93..031fa11 100644
+--- a/app/ui/widgets/actions/job_manager_actions.py
++++ b/app/ui/widgets/actions/job_manager_actions.py
+@@ -509,16 +509,22 @@ def _load_job_controls_and_state(
+     main_window.last_input_media_folder_path = data.get(
+         "last_input_media_folder_path", ""
+     )
+-    main_window.targetVideosPathLineEdit.setText(
+-        main_window.last_target_media_folder_path
+-    )
+-    main_window.targetVideosPathLineEdit.setToolTip(
+-        main_window.last_target_media_folder_path
+-    )
+-    main_window.inputFacesPathLineEdit.setText(main_window.last_input_media_folder_path)
+-    main_window.inputFacesPathLineEdit.setToolTip(
+-        main_window.last_input_media_folder_path
+-    )
++    #修改-路径标签-添加截断显示
++    if main_window.last_target_media_folder_path:
++        main_window.targetVideosPathLineEdit.setText(
++            misc_helpers.truncate_text(main_window.last_target_media_folder_path)
++        )
++        main_window.targetVideosPathLineEdit.setToolTip(
++            main_window.last_target_media_folder_path
++        )
++    #修改-路径标签-end
++    if main_window.last_input_media_folder_path:
++        main_window.inputFacesPathLineEdit.setText(
++            misc_helpers.truncate_text(main_window.last_input_media_folder_path)
++        )
++        main_window.inputFacesPathLineEdit.setToolTip(
++            main_window.last_input_media_folder_path
++        )
+     main_window.loaded_embedding_filename = data.get("loaded_embedding_filename", "")
+ 
+     # Update all control widgets in the "Settings" tab
+diff --git a/app/ui/widgets/actions/list_view_actions.py b/app/ui/widgets/actions/list_view_actions.py
+index 6e58442..515afe5 100644
+--- a/app/ui/widgets/actions/list_view_actions.py
++++ b/app/ui/widgets/actions/list_view_actions.py
+@@ -762,7 +762,8 @@ def _set_up_panel_context_menu(
+ 
+ @QtCore.Slot()
+ def select_input_face_images(
+-    main_window: "MainWindow", source_type="folder", folder_name=False, files_list=None
++    #修改-添加查找人脸对话框
++    main_window: "MainWindow", source_type="folder", folder_name=False, files_list=None, skip_dialog=False
+ ):
+     from app.ui.widgets.actions import video_control_actions
+ 
+@@ -772,12 +773,13 @@ def select_input_face_images(
+         return
+ 
+     files_list = files_list or []
+-    if source_type == "folder":
++    if source_type == "folder" and not skip_dialog:   #修改-添加查找人脸对话框
+         folder_name = QtWidgets.QFileDialog.getExistingDirectory(
+             dir=main_window.last_input_media_folder_path
+         )
+         if not folder_name:
+             return
++    if folder_name:  #修改-添加查找人脸对话框
+         main_window.inputFacesPathLineEdit.setText(folder_name)
+         main_window.inputFacesPathLineEdit.setToolTip(folder_name)
+         main_window.last_input_media_folder_path = folder_name
+@@ -890,6 +892,35 @@ def open_output_media_folder(main_window: "MainWindow", folder_name: str | None
+     _open_folder_in_file_manager(main_window, folder_name)
+ 
+ 
++# 修改-添加查找人脸对话框-start
++def show_find_face_dialog(main_window: "MainWindow"):
++    if not main_window.last_input_media_folder_path:
++        QtWidgets.QMessageBox.warning(
++            main_window,
++            "警告",
++            "请先选择一个输入人脸文件夹！",
++        )
++        return
++
++    parent_path = main_window.last_input_media_folder_path
++    parent_path = os.path.dirname(parent_path)
++
++    if not os.path.exists(parent_path):
++        QtWidgets.QMessageBox.warning(
++            main_window,
++            "无法获取上级目录！",
++            main_window,
++        )
++        return
++
++    dialog = widget_components.FindFaceDialog(main_window, parent_path)
++
++    if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
++        if dialog.selected_folder:
++            select_input_face_images(main_window, source_type="folder", folder_name=dialog.selected_folder, skip_dialog=True)
++# 修改-添加查找人脸对话框-end
++
++
+ def open_target_media_folder(main_window: "MainWindow"):
+     folder_name = main_window.targetVideosPathLineEdit.text().strip()
+     if not folder_name:
+diff --git a/app/ui/widgets/actions/save_load_actions.py b/app/ui/widgets/actions/save_load_actions.py
+index be3e254..650396e 100644
+--- a/app/ui/widgets/actions/save_load_actions.py
++++ b/app/ui/widgets/actions/save_load_actions.py
+@@ -699,18 +699,22 @@ def load_saved_workspace(
+             main_window.last_input_media_folder_path = data.get(
+                 "last_input_media_folder_path", ""
+             )
+-            main_window.targetVideosPathLineEdit.setText(
+-                main_window.last_target_media_folder_path
+-            )
+-            main_window.targetVideosPathLineEdit.setToolTip(
+-                main_window.last_target_media_folder_path
+-            )
+-            main_window.inputFacesPathLineEdit.setText(
+-                main_window.last_input_media_folder_path
+-            )
+-            main_window.inputFacesPathLineEdit.setToolTip(
+-                main_window.last_input_media_folder_path
+-            )
++            #修改-路径标签-添加截断显示
++            if main_window.last_target_media_folder_path:
++                main_window.targetVideosPathLineEdit.setText(
++                    misc_helpers.truncate_text(main_window.last_target_media_folder_path)
++                )
++                main_window.targetVideosPathLineEdit.setToolTip(
++                    main_window.last_target_media_folder_path
++                )
++            #修改-路径标签-end
++            if main_window.last_input_media_folder_path:
++                main_window.inputFacesPathLineEdit.setText(
++                    misc_helpers.truncate_text(main_window.last_input_media_folder_path)
++                )
++                main_window.inputFacesPathLineEdit.setToolTip(
++                    main_window.last_input_media_folder_path
++                )
+             main_window.loaded_embedding_filename = data.get(
+                 "loaded_embedding_filename", ""
+             )
+diff --git a/app/ui/widgets/widget_components.py b/app/ui/widgets/widget_components.py
+index 93441d1..0526a69 100644
+--- a/app/ui/widgets/widget_components.py
++++ b/app/ui/widgets/widget_components.py
+@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QPushButton
+ import cv2
+ import numpy as np
+ import torch
++from pypinyin import lazy_pinyin  #修改-添加拼音支持
+ import gc
+ 
+ import app.ui.widgets.actions.common_actions as common_widget_actions
+@@ -2101,22 +2102,50 @@ class LoadLastWorkspaceDialog(QtWidgets.QDialog):
+         self.setWindowTitle("Load Last Workspace")
+         self.setWindowIcon(QtGui.QIcon(":/media/media/visomaster_small.png"))
+ 
++        # 修改-启动弹窗添加倒计时
++        self.setModal(True)
++
++        self.countdown_seconds = 5
++        self.timer = None
++
+         # Create button box
+         QBtn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+         self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
+-        self.buttonBox.setCenterButtons(True)  # <-- ADD THIS LINE
++        self.buttonBox.setCenterButtons(True)
+         self.buttonBox.accepted.connect(self.load_workspace)
+         self.buttonBox.rejected.connect(self.reject)
+ 
++        self.countdown_label = QtWidgets.QLabel(f"Auto loading in {self.countdown_seconds} seconds...")
++        self.countdown_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
++
+         # Create layout and add widgets
+         layout = QtWidgets.QVBoxLayout()
+         layout.addWidget(QtWidgets.QLabel("Do you want to load your last workspace?"))
++        layout.addWidget(self.countdown_label)
+         layout.addWidget(self.buttonBox)
+ 
+         # Set dialog layout
+         self.setLayout(layout)
+ 
++        self.start_countdown()
++
++    def start_countdown(self):
++        self.timer = QtCore.QTimer(self)
++        self.timer.timeout.connect(self.update_countdown)
++        self.timer.start(1000)
++
++    def update_countdown(self):
++        self.countdown_seconds -= 1
++        if self.countdown_seconds > 0:
++            from app.ui.translations import translate
++            self.countdown_label.setText(translate(f"Auto loading in {self.countdown_seconds} seconds..."))
++        else:
++            self.timer.stop()
++            self.load_workspace()
++
+     def load_workspace(self):
++        if self.timer:
++            self.timer.stop()
+         self.accept()
+         save_load_actions.load_saved_workspace(self.main_window, "last_workspace.json")
+ 
+@@ -3162,3 +3191,91 @@ class CollapsibleSection(QtWidgets.QWidget):
+ 
+     def toggle_expanded(self):
+         self.set_expanded(not self._expanded)
++
++
++#修改-添加人脸查找对话框-start
++class FindFaceDialog(QtWidgets.QDialog):
++    def __init__(self, main_window: "MainWindow", parent_path: str):
++        super().__init__(main_window)
++        self.main_window = main_window
++        self.parent_path = parent_path
++        self.selected_folder = ""
++        self.all_folders = []
++
++        self.setWindowTitle("查找人脸")
++        self.setWindowIcon(QtGui.QIcon(":/media/media/visomaster_small.png"))
++        self.setMinimumSize(400, 500)
++        self.setModal(True)
++
++        self.search_label = QtWidgets.QLabel("搜索:")
++        self.search_edit = QtWidgets.QLineEdit(self)
++        self.search_edit.setPlaceholderText("输入拼音、汉字或字符搜索...")
++        self.search_edit.textChanged.connect(self.filter_folders)
++
++        self.folder_list = QtWidgets.QListWidget(self)
++        self.folder_list.itemDoubleClicked.connect(self.select_folder)
++
++        QBtn = QtWidgets.QDialogButtonBox.Cancel
++        self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
++        self.buttonBox.rejected.connect(self.reject)
++
++        layout = QtWidgets.QVBoxLayout()
++        layout.addWidget(self.search_label)
++        layout.addWidget(self.search_edit)
++        layout.addWidget(QtWidgets.QLabel("人脸文件夹:"))
++        layout.addWidget(self.folder_list)
++        layout.addWidget(self.buttonBox)
++
++        self.setLayout(layout)
++
++        self.load_folders()
++
++    def get_pinyin(self, text, initials=False):
++        try:
++            pinyin_list = lazy_pinyin(text)
++            if initials:
++                initials_list = [p[0] if p else '' for p in pinyin_list]
++                pinyin_text = ''.join(initials_list).lower()
++            else:
++                pinyin_text = ''.join(pinyin_list).lower()
++            return pinyin_text
++        except Exception:
++            return text.lower()
++
++    def load_folders(self):
++        self.folder_list.clear()
++        self.all_folders = []
++
++        if not os.path.exists(self.parent_path):
++            return
++
++        try:
++            for item in os.listdir(self.parent_path):
++                item_path = os.path.join(self.parent_path, item)
++                if os.path.isdir(item_path):
++                    self.all_folders.append(item)
++                    list_item = QtWidgets.QListWidgetItem(item)
++                    self.folder_list.addItem(list_item)
++        except Exception as e:
++            pass
++
++    def filter_folders(self):
++        search_text = self.search_edit.text().lower()
++
++        self.folder_list.clear()
++
++        for folder in self.all_folders:
++            folder_lower = folder.lower()
++            folder_pinyin = self.get_pinyin(folder, initials=False)
++            folder_pinyin_initials = self.get_pinyin(folder, initials=True)
++
++            if (search_text in folder_lower or
++                search_text in folder_pinyin or
++                search_text in folder_pinyin_initials):
++                list_item = QtWidgets.QListWidgetItem(folder)
++                self.folder_list.addItem(list_item)
++
++    def select_folder(self, item):
++        self.selected_folder = os.path.join(self.parent_path, item.text())
++        self.accept()
++#修改-添加人脸查找对话框-end
+-- 
+2.54.0.windows.1
+

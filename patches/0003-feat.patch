@@ -1,0 +1,99 @@
+From 2e36a3ab661035dc076b4def4a49c7bf33df74fa Mon Sep 17 00:00:00 2001
+From: zhei87 <zhei87@163.com>
+Date: Wed, 13 May 2026 19:39:37 +0800
+Subject: [PATCH 3/5] =?UTF-8?q?feat:=20=E6=B7=BB=E5=8A=A0=E5=AD=90?=
+ =?UTF-8?q?=E7=9B=AE=E5=BD=95=E4=BF=9D=E5=AD=98=E5=8A=9F=E8=83=BD?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- get_output_file_path 新增 save_to_subdirectory 和 input_face_path 参数
+- 可开关的子目录保存：在输出目录下按人脸名称创建子文件夹
+- Settings 面板新增 SaveToSubdirectoryToggle 控件
+---
+ app/helpers/miscellaneous.py           | 14 +++++++++++++-
+ app/processors/video_processor.py      |  4 ++++
+ app/ui/widgets/settings_layout_data.py |  6 ++++++
+ 3 files changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/app/helpers/miscellaneous.py b/app/helpers/miscellaneous.py
+index 24b1573..ef3c56e 100644
+--- a/app/helpers/miscellaneous.py
++++ b/app/helpers/miscellaneous.py
+@@ -977,6 +977,8 @@ def get_output_file_path(
+     job_name: Optional[str] = None,
+     use_job_name_for_output: bool = False,
+     output_file_name: Optional[str] = None,
++    save_to_subdirectory: bool = False,
++    input_face_path: Optional[str] = None,
+ ) -> str:
+     """
+     Determines the full output path for a processed media file based on a priority system.
+@@ -995,6 +997,8 @@ def get_output_file_path(
+         job_name (str, optional): The name of the current job, used if `use_job_name_for_output` is True.
+         use_job_name_for_output (bool): Flag to indicate if the job name should be used for the output filename.
+         output_file_name (str, optional): A specific name for the output file.
++        save_to_subdirectory (bool): Flag to indicate if output should be saved to a subdirectory named after the input face.
++        input_face_path (str, optional): The path of the input face, used to extract face name for subdirectory.
+ 
+     Returns:
+         str: The fully constructed, absolute path for the output file.
+@@ -1029,7 +1033,15 @@ def get_output_file_path(
+ 
+     # --- Final Path Construction ---
+     output_filename = f"{output_base_name}{extension}"
+-    output_file_path = os.path.join(output_folder, output_filename)
++
++    # --- Subdirectory Logic ---
++    if save_to_subdirectory and input_face_path:
++        face_folder_name = os.path.basename(input_face_path)
++        subdirectory_path = os.path.join(output_folder, face_folder_name)
++        output_file_path = os.path.join(subdirectory_path, output_filename)
++    else:
++        output_file_path = os.path.join(output_folder, output_filename)
++
+     return output_file_path
+ 
+ 
+diff --git a/app/processors/video_processor.py b/app/processors/video_processor.py
+index 81f6c1d..7be9d17 100644
+--- a/app/processors/video_processor.py
++++ b/app/processors/video_processor.py
+@@ -3563,6 +3563,8 @@ class VideoProcessor(QObject):
+                     job_name=job_name,
+                     use_job_name_for_output=use_job_name,
+                     output_file_name=output_file_name,
++                    save_to_subdirectory=self.main_window.control.get("SaveToSubdirectoryToggle", False),
++                    input_face_path=self.main_window.last_input_media_folder_path,
+                 )
+ 
+                 # Add suffix if stopped due to error limit
+@@ -4249,6 +4251,8 @@ class VideoProcessor(QObject):
+             job_name=job_name,
+             use_job_name_for_output=use_job_name,
+             output_file_name=output_file_name,
++            save_to_subdirectory=self.main_window.control.get("SaveToSubdirectoryToggle", False),
++            input_face_path=self.main_window.last_input_media_folder_path,
+         )
+ 
+         # Add suffix if stopped due to error limit
+diff --git a/app/ui/widgets/settings_layout_data.py b/app/ui/widgets/settings_layout_data.py
+index d62edf8..3fa6d43 100644
+--- a/app/ui/widgets/settings_layout_data.py
++++ b/app/ui/widgets/settings_layout_data.py
+@@ -218,6 +218,12 @@ SETTINGS_LAYOUT_DATA: Any = {  # noqa: F811
+             "default": False,
+             "help": "Opens the output folder after recording ends.",
+         },
++        "SaveToSubdirectoryToggle": {
++            "level": 1,
++            "label": "Save to Subdirectory",
++            "default": False,
++            "help": "Save video to a subdirectory named after the face in the output folder.",
++        },
+         "HDREncodeToggle": {
+             "level": 1,
+             "label": "HDR Encoding - Use on HDR videos only (CPU)",
+-- 
+2.54.0.windows.1
+

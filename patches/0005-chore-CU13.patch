@@ -1,0 +1,26 @@
+From 946334ff3ec31251556f3940829e77575d7e0960 Mon Sep 17 00:00:00 2001
+From: zhei87 <zhei87@163.com>
+Date: Thu, 14 May 2026 08:12:28 +0800
+Subject: [PATCH 5/5] =?UTF-8?q?chore:=20=E9=85=8D=E7=BD=AE=E6=B8=85?=
+ =?UTF-8?q?=E5=8D=8E=E6=BA=90=E5=B9=B6=E5=AE=89=E8=A3=85CU13=E7=8E=AF?=
+ =?UTF-8?q?=E5=A2=83=E4=BE=9D=E8=B5=96?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+设置UV_INDEX_URL为清华PyPI源，执行依赖安装命令
+---
+ ...273\272 \346\226\207\346\234\254\346\226\207\346\241\243.txt" | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 "\346\226\260\345\273\272 \346\226\207\346\234\254\346\226\207\346\241\243.txt"
+
+diff --git "a/\346\226\260\345\273\272 \346\226\207\346\234\254\346\226\207\346\241\243.txt" "b/\346\226\260\345\273\272 \346\226\207\346\234\254\346\226\207\346\241\243.txt"
+new file mode 100644
+index 0000000..cb4cddc
+--- /dev/null
++++ "b/\346\226\260\345\273\272 \346\226\207\346\234\254\346\226\207\346\241\243.txt"	
+@@ -0,0 +1 @@
++$env:UV_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"; uv pip install -r requirements_cu13.txt
+-- 
+2.54.0.windows.1
+

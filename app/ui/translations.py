@@ -139,7 +139,6 @@ TRANSLATIONS: Dict[str, str] = {
     "Show ByteTrack Bounding Boxes": "显示 ByteTrack 边界框",
     "Enable Frame Enhancer": "启用帧增强器",
     "Frame Enhancer Type": "帧增强器类型",
-    "Blend": "混合",
     "Webcam Max No": "最大摄像头数",
     "Webcam Backend": "摄像头后端",
     "Webcam Resolution": "摄像头分辨率",
