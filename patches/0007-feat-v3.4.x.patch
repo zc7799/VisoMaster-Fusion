@@ -1,0 +1,242 @@
+From 86159ae74fbe436c84fee5c7436355dbb19e8fb4 Mon Sep 17 00:00:00 2001
+From: zhei87 <zhei87@163.com>
+Date: Fri, 22 May 2026 15:56:15 +0800
+Subject: [PATCH 7/8] =?UTF-8?q?feat:=20=E8=A1=A5=E5=85=85=E4=B8=8A?=
+ =?UTF-8?q?=E6=B8=B8=20v3.4.x=20=E6=96=B0=E5=A2=9E=E5=8A=9F=E8=83=BD?=
+ =?UTF-8?q?=E7=9A=84=E6=B1=89=E5=8C=96=E7=BF=BB=E8=AF=91?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+新增约180条翻译条目，覆盖：
+- 输出设置面板（保存到目标位置/保留源目录结构/按源名称聚类输出）
+- 录制确认弹窗（停止录制提示）
+- 表情编辑器新增选项（注视锁定/触发模式等）
+- 任务管理器弹窗
+- 预设管理弹窗
+- 改进动态翻译器以捕获更多控件类型
+---
+ app/ui/translations.py | 193 ++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 192 insertions(+), 1 deletion(-)
+
+diff --git a/app/ui/translations.py b/app/ui/translations.py
+index 41cf243..bad0ee0 100644
+--- a/app/ui/translations.py
++++ b/app/ui/translations.py
+@@ -628,6 +628,180 @@ TRANSLATIONS: Dict[str, str] = {
+     "Use the advanced iteration mode to prevent drift and preserve skin texture.": "使用高级迭代模式防止漂移并保持皮肤纹理。",
+     "Increase up to 5x additional swaps (500%).": "增加高达 5 倍的额外换脸 (500%)。",
+     "This is a feature to perform direct adjustments to likeness of faces.": "这是一个执行人脸相似度直接调整的功能。",
++    # === 新增: 上游 v3.4.x 新增的面板和选项 ===
++    "Output Settings": "输出设置",
++    "Output to Target Location": "保存到目标位置",
++    "Preserve Source Directory Structure": "保留源目录结构",
++    "Cluster Output by Source Name": "按源名称聚类输出",
++    "Resize Input Source": "调整输入源大小",
++    "Frame Worker Delay": "帧处理器延迟",
++    "Confirm Before Stopping Recording": "停止录制前确认",
++    "Theatre Mode Uses Fullscreen": "剧院模式使用全屏",
++    "Save to Subdirectory": "保存到子目录",
++    "Auto-set quality from source": "根据源自动设置质量",
++    "Enable Mouse Wheel on Parameter Controls": "启用参数控件的鼠标滚轮",
++    "ReF-LDM Denoiser": "ReF-LDM 降噪器",
++    "Face Restorer": "人脸修复器",
++    # === 新增: 表情编辑器的注视锁定相关 ===
++    "Camera Gaze Lock": "相机注视锁定",
++    "Gaze Strength": "注视强度",
++    "Gaze Vertical Fine-Tune": "注视垂直微调",
++    "Relative Lids + Retargeted Gaze": "相对眼睑 + 重定向注视",
++    "Trigger Mode": "触发模式",
++    "Exclude Upper Teeth Area": "排除上牙区域",
++    "Show Mouth Region Outline": "显示嘴部区域轮廓",
++    "Size": "大小",
++    "Blend": "混合",
++    "Apply": "应用",
++    # === 新增: 弹窗/对话框文本 ===
++    "Stop recording?": "停止录制？",
++    "Recording will stop immediately. Output may be incomplete.": "录制将立即停止。输出可能不完整。",
++    "No target face selected": "未选择目标人脸",
++    "Select a target face before copying parameters.": "请先选择目标人脸，再复制参数。",
++    "No parameters found": "未找到参数",
++    "The selected target face has no parameters to copy.": "选中的目标人脸没有可复制的参数。",
++    "Select a target face before pasting parameters.": "请先选择目标人脸，再粘贴参数。",
++    "No parameters found in Clipboard": "剪贴板中未找到参数",
++    "You need to copy parameters from any of the target face before pasting it!": "粘贴前请先从任意目标人脸复制参数！",
++    "Select a target face before resetting parameters.": "请先选择目标人脸，再重置参数。",
++    "Cannot add a new Start marker before completing the previous End marker.": "在完成上一个结束标记之前，无法添加新的起始标记。",
++    "Cannot set End marker without a preceding Start marker.": "没有前置起始标记，无法设置结束标记。",
++    "Job end frame must be after the job start frame.": "任务结束帧必须在起始帧之后。",
++    "Restore Frame": "恢复帧",
++    "Drop Frame": "丢弃帧",
++    "Drop Issue Frames": "丢弃问题帧",
++    "Mark all current issue frames as dropped for render output?": "将所有当前问题帧标记为渲染输出时丢弃？",
++    "Scan In Progress": "扫描进行中",
++    "Cannot {action_name} while an issue scan is running.\nAbort the scan first, then retry the action.": "问题扫描进行中，无法执行 {action_name}。\n请先中止扫描，然后重试操作。",
++    "Abort Scan": "中止扫描",
++    "Scan for Issues": "扫描问题",
++    "Abort Scan ({processed}/{max(total, 1)})": "中止扫描 ({processed}/{max(total, 1)})",
++    "No Input Faces": "无输入人脸",
++    "Please select at least one Input Face or Embedding to use for swapping.": "请至少选择一个输入人脸或嵌入用于换脸。",
++    "Confirm Batch Swap (All Faces)": "确认批量换脸（所有人脸）",
++    "Confirm Batch Swap (Current Config)": "确认批量换脸（当前配置）",
++    "Starting batch processing...": "正在启动批量处理...",
++    # === 新增: 任务管理器弹窗 ===
++    "Job Saved": "任务已保存",
++    "Save Error": "保存错误",
++    "No Job Selected": "未选择任务",
++    "Please select one or more jobs to delete.": "请选择一个或多个任务进行删除。",
++    "Confirm Deletion": "确认删除",
++    "Delete Error": "删除错误",
++    "Job(s) Deleted": "任务已删除",
++    "Selected jobs moved to Recycle Bin.": "已选任务已移至回收站。",
++    "Job(s) Not Found": "未找到任务",
++    "None of the selected jobs exist.": "所选任务均不存在。",
++    "Multiple Jobs Selected": "选择了多个任务",
++    "You can only load one job at a time. Please select a single job to load.": "一次只能加载一个任务。请选择单个任务加载。",
++    "Load Error": "加载错误",
++    "Restore Error": "恢复错误",
++    "Failed to restore workspace: Snapshot data was empty.": "恢复工作区失败：快照数据为空。",
++    "An error occurred while restoring the workspace:\n{e}": "恢复工作区时发生错误：\n{e}",
++    "Clearing State": "清除状态",
++    "Loading Target Media": "加载目标媒体",
++    "Loading Input Faces": "加载输入人脸",
++    "Loading Embeddings": "加载嵌入",
++    "Loading Target Faces": "加载目标人脸",
++    "Loading Settings": "加载设置",
++    "Loading Markers": "加载标记",
++    "Finalizing": "最终处理",
++    "Confirm Save": "确认保存",
++    "No target faces found!\nNo face swaps will happen for this job. Proceed anyway?": "未找到目标人脸！\n此任务不会执行换脸。仍然继续？",
++    "Workspace Not Ready": "工作区未就绪",
++    "An Output Folder must be set in the 'Settings' tab before saving a job.": "保存任务前必须在\"设置\"标签页中设置输出文件夹。",
++    "No input faces or embeddings are assigned to ANY target face!\nNo face swaps will happen for this job. Proceed anyway?": "没有任何目标人脸分配了输入人脸或嵌入！\n此任务不会执行换脸。仍然继续？",
++    "Invalid Job Name": "无效的任务名称",
++    "Job name cannot be empty.": "任务名称不能为空。",
++    "Invalid Output File Name": "无效的输出文件名",
++    "Job name contains invalid characters.\nCharacters not allowed: < > : \" / \\ | ? * or control characters.": "任务名称包含无效字符。\n不允许的字符：< > : \" / \\ | ? * 或控制字符。",
++    "Output file name contains invalid characters.\nCharacters not allowed: < > : \" / \\ | ? * or control characters.": "输出文件名包含无效字符。\n不允许的字符：< > : \" / \\ | ? * 或控制字符。",
++    "Loading All Target Media": "加载所有目标媒体",
++    "Loading All Input Faces": "加载所有输入人脸",
++    "Loading All Embeddings": "加载所有嵌入",
++    "Initializing batch...": "正在初始化批处理...",
++    "Job Processing Complete": "任务处理完成",
++    "All valid jobs have finished processing.": "所有有效任务已完成处理。",
++    "Job Processing Failed": "任务处理失败",
++    "The job batch finished with errors. Please check the log for details. Any jobs that failed were not moved to 'completed'.": "任务批处理完成但存在错误。请检查日志了解详情。失败的任务未移至\"已完成\"。",
++    "Already Processing": "正在处理中",
++    "A job processor is already running.": "任务处理器已在运行中。",
++    "Job Failed": "任务失败",
++    "Please select one or more jobs to process.": "请选择一个或多个任务进行处理。",
++    "The following jobs were skipped due to errors:\n\n": "以下任务因错误而被跳过：\n\n",
++    "An error occurred while loading batch assets:\n{e}": "加载批处理资源时发生错误：\n{e}",
++    "An error occurred while loading settings for job:\n{e}": "加载任务设置时发生错误：\n{e}",
++    "Failed to restore workspace: {e}\nThe UI may be in an unstable state. Please restart.": "恢复工作区失败：{e}\n界面可能处于不稳定状态。请重启。",
++    "Skipped Jobs": "跳过的任务",
++    # === 新增: 预设管理 ===
++    "Apply Preset": "应用预设",
++    "Do you want to apply preset: {item.text()}?": "是否应用预设：{item.text()}？",
++    "Rename Preset": "重命名预设",
++    "Enter new name:": "输入新名称：",
++    "Name Exists": "名称已存在",
++    "A preset named '{new_name}' already exists.": "名为\"{new_name}\"的预设已存在。",
++    "Preset Renamed": "预设已重命名",
++    "Failed to rename preset: {str(e)}": "重命名预设失败：{str(e)}",
++    "Failed to delete preset: {str(e)}": "删除预设失败：{str(e)}",
++    "Rename": "重命名",
++    "Delete": "删除",
++    "Selection error.": "选择错误。",
++    "Select only one preset to overwrite or deselect all to create a new preset.": "仅选择一个预设进行覆盖，或取消全选以创建新预设。",
++    "Save Preset": "保存预设",
++    "Enter preset name:": "输入预设名称：",
++    "Confirm Overwrite": "确认覆盖",
++    "Preset: {name} already exists, overwrite ?": "预设：{name} 已存在，是否覆盖？",
++    "Are you sure you want to overwrite preset: {name}?": "确定要覆盖预设：{name}？",
++    "Preset Saved": "预设已保存",
++    # === 新增: 保存/加载/嵌入 ===
++    "Embeddings List Empty!": "嵌入列表为空！",
++    "No Embeddings available to save": "没有可保存的嵌入",
++    "Save all embeddings to the current file?\n\nThis will overwrite:\n{embedding_filename}": "保存所有嵌入到当前文件？\n\n这将覆盖：\n{embedding_filename}",
++    "Workspace Saved": "工作区已保存",
++    # === 新增: 列表视图/关于 ===
++    "About": "关于",
++    "VisoMaster Fusion": "VisoMaster Fusion",
++    "Advanced image and video editing toolkit.\nSee the User Manual for setup and usage guidance.": "高级图像和视频编辑工具包。\n请参阅用户手册了解安装和使用指南。",
++    "Quick Links": "快速链接",
++    "Close": "关闭",
++    "Load Target Media Folder": "加载目标媒体文件夹",
++    "Load Target Media Files": "加载目标媒体文件",
++    "Load Input Faces Folder": "加载输入人脸文件夹",
++    "Load Input Face Files": "加载输入人脸文件",
++    "Open Target Media Folder": "打开目标媒体文件夹",
++    "Open Input Faces Folder": "打开输入人脸文件夹",
++    "Open Output Folder": "打开输出文件夹",
++    "Fullscreen\tF11": "全屏\tF11",
++    "Fit to View": "适应视图",
++    "Fullscreen": "全屏",
++    "Test": "测试",
++    "Found {num_images} images in the target list.\n\nThis will find ALL faces in each image and process them using the currently selected input faces and parameters.\n\nProceed with batch swap?": "在目标列表中找到 {num_images} 张图片。\n\n这将查找每张图片中的所有面部，并使用当前选定的输入人脸和参数进行处理。\n\n是否继续批量换脸？",
++    "Found {num_images} images and {num_videos} videos in the target list.\n\nThis will process each item using the current UI configuration (Using the selected inputs faces and parameters on the selected Target Face).\n\nProceed with batch swap?": "在目标列表中找到 {num_images} 张图片和 {num_videos} 个视频。\n\n这将使用当前界面配置（选定目标人脸上的输入人脸和参数）处理每个项目。\n\n是否继续批量换脸？",
++    "Could not find:\n{folder_name}": "未找到：\n{folder_name}",
++    "No {folder_label.lower()} is currently set.": "当前未设置 {folder_label.lower()}。",
++    "{folder_label} Unavailable": "{folder_label} 不可用",
++    # === 修复: 帮助提示文本更新 ===
++    "Delay in seconds before AI processing when seeking in video. Prevents GPU overload and stuttering.": "视频拖动时AI处理前的延迟（秒）。防止GPU过载和卡顿。",
++    "Set the maximum number of DFM Models to keep in memory at a time. Set this based on your GPU's VRAM": "设置一次保存在内存中的最大 DFM 模型数量。根据您 GPU 的 VRAM 设置此项",
++    "When enabled, entering Theatre Mode also switches the window to fullscreen and restores the previous window state when Theatre Mode is turned off.": "启用后，进入剧院模式也会切换到全屏，退出剧院模式时恢复之前的窗口状态。",
++    "Show a confirmation prompt before manually stopping a recording.": "手动停止录制前显示确认提示。",
++    "Save video to a subdirectory named after the face in the output folder.": "将视频保存到输出文件夹中以人脸命名的子目录中。",
++    "Save processed output next to the current target media instead of the global output folder.": "将处理后的输出保存到当前目标媒体旁边，而不是全局输出文件夹。",
++    "When loading targets from a folder recursively, mirror each target's parent subfolder path inside the output folder.": "递归加载文件夹中的目标时，在输出文件夹内镜像每个目标的父级子文件夹路径。",
++    "Save processed output into a subfolder named after the selected merged embedding.": "将处理后的输出保存到以选定的合并嵌入命名的子文件夹中。",
++    "Estimate source complexity with ffprobe and automatically set Quality from the source metrics for more consistent visual quality across mixed encodes. When enabled, the manual Quality slider is overridden; when disabled, manual Quality is used.": "使用ffprobe评估源复杂度，并根据源指标自动设置质量，使混合编码的视觉质量更加一致。启用后，手动质量滑块将被覆盖；禁用后，使用手动质量设置。",
++    "When enabled, the mouse wheel adjusts parameter sliders and dropdowns on hover.\nWhen disabled, the mouse wheel scrolls the parameter panel instead.\nHold Ctrl to temporarily adjust a hovered slider or dropdown while this is disabled.": "启用时，鼠标滚轮悬停时调整参数滑块和下拉菜单。\n禁用时，鼠标滚轮改为滚动参数面板。\n禁用时，按住 Ctrl 可临时调整悬停的滑块或下拉菜单。",
++    "Choose the backend based on the Virtual Camera you have set up": "根据您设置的虚拟摄像头选择后端",
++    "Send the swapped video/webcam output to virtual camera for using in external applications": "将换脸后的视频/网络摄像头输出发送到虚拟摄像头以用于外部应用程序",
++    "Select the backend for accessing webcam input.": "选择访问网络摄像头输入的后端。",
++    "Select the maximum number of webcam streams to allow for face swapping.": "选择允许换脸的最大网络摄像头流数量。",
++    "Select the maximum resolution for webcam input.": "选择网络摄像头输入的最大分辨率。",
++    "Set the maximum frames per second (FPS) for webcam input.": "设置网络摄像头输入的最大帧率。",
++    "Stops the models from automatically unloading when changing settings, only with CLEAR GPU button.": "更改设置时阻止模型自动卸载，仅通过清除显存按钮卸载。",
++    "Select the type of frame enhancement to apply, based on the content and resolution requirements.": "根据内容和分辨率要求选择要应用的帧增强类型。",
++    "Enable frame enhancement for video inputs to improve visual quality.": "启用视频输入的帧增强以提高视觉质量。",
++    "Draw ByteTrack tracked bounding boxes in orange. Use instead of 'Show Bounding Boxes' when face tracking is enabled.": "用橙色绘制ByteTrack跟踪的边界框。启用人脸追踪时使用此项代替\"显示边界框\"。",
++    "Set the confidence score threshold for face detection. Higher values ensure more confident detections but may miss some faces.": "设置人脸检测的置信度阈值。较高的值确保更有把握的检测，但可能漏掉一些面部。",
+ }
+ 
+ 
+@@ -650,7 +824,7 @@ def install_translator(app):
+             self.dynamic_timer = QtCore.QTimer()
+             self.dynamic_timer.timeout.connect(self.translate_dynamic_tooltips)
+             self.dynamic_timer.start(500)
+-            QtCore.QTimer.singleShot(5000, lambda: self.dynamic_timer.stop())
++            QtCore.QTimer.singleShot(15000, lambda: self.dynamic_timer.stop())
+             
+         def translate_dynamic_tooltips(self):
+             for widget in self.app.topLevelWidgets():
+@@ -658,6 +832,23 @@ def install_translator(app):
+                     tt = child.toolTip()
+                     if tt and tt != translate(tt):
+                         child.setToolTip(translate(tt))
++                # 同时翻译动态创建的 GroupBox 标题和 QLabel/按钮文本
++                for child in widget.findChildren(QtWidgets.QGroupBox):
++                    t = child.title()
++                    if t and t != translate(t):
++                        child.setTitle(translate(t))
++                for child in widget.findChildren(QtWidgets.QLabel):
++                    t = child.text()
++                    if t and t != translate(t):
++                        child.setText(translate(t))
++                for child in widget.findChildren(QtWidgets.QPushButton):
++                    t = child.text()
++                    if t and t != translate(t):
++                        child.setText(translate(t))
++                for child in widget.findChildren(QtWidgets.QCheckBox):
++                    t = child.text()
++                    if t and t != translate(t):
++                        child.setText(translate(t))
+             
+         def setup_tab_callbacks(self):
+             for widget in self.app.topLevelWidgets():
+-- 
+2.54.0.windows.1
+
